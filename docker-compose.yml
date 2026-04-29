@@ -1,0 +1,7 @@
+services:
+  central:
+    build: .
+    container_name: vps-traffic-central
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

@@ -4,6 +4,7 @@
 Provides:
 - ingest endpoint with HMAC verification
 - node config endpoint: monthly quota, reset day, login verification
+- one-click install/uninstall script generation for agent nodes
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Dict
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
-app = FastAPI(title="VPS Traffic Monitor Central API", version="0.1.0")
+app = FastAPI(title="VPS Traffic Monitor Central API", version="0.2.0")
 
 
 @dataclass
@@ -74,6 +75,96 @@ def verify_sig(secret: str, timestamp: str, nonce: str, body: bytes, signature: 
     return hmac.compare_digest(expected, signature)
 
 
+def build_one_click_script(cfg: NodeConfig, action: str) -> str:
+    if action not in {"install", "uninstall"}:
+        raise ValueError("action must be install/uninstall")
+
+    if action == "install":
+        return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${{1:-install}}"
+if [[ "$ACTION" != "install" ]]; then
+  echo "unsupported action: $ACTION" >&2
+  exit 1
+fi
+
+install -d /opt/vps-traffic-monitor /etc/vps-traffic-monitor /var/log/vps-traffic-monitor
+
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update -y
+  apt-get install -y curl python3 vnstat
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y curl python3 vnstat
+elif command -v yum >/dev/null 2>&1; then
+  yum install -y curl python3 vnstat
+else
+  echo "unsupported package manager" >&2
+  exit 1
+fi
+
+systemctl enable --now vnstat || true
+curl -fsSL {cfg.install_script_url or 'https://example.com/traffic_agent.py'} -o /opt/vps-traffic-monitor/traffic_agent.py
+chmod +x /opt/vps-traffic-monitor/traffic_agent.py
+
+cat >/etc/vps-traffic-monitor/agent.env <<'EOF'
+ENDPOINT={cfg.agent_endpoint}
+API_KEY={cfg.agent_api_key}
+HMAC_SECRET={cfg.agent_hmac_secret}
+NODE_ID={cfg.node_id}
+IFACE={cfg.agent_iface}
+INTERVAL={cfg.agent_interval}
+EOF
+
+cat >/etc/systemd/system/vps-traffic-agent.service <<'EOF'
+[Unit]
+Description=VPS Traffic Monitor Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/vps-traffic-monitor/agent.env
+ExecStart=/usr/bin/python3 /opt/vps-traffic-monitor/traffic_agent.py \\
+  --endpoint $ENDPOINT \\
+  --api-key $API_KEY \\
+  --hmac-secret $HMAC_SECRET \\
+  --node-id $NODE_ID \\
+  --iface $IFACE \\
+  --interval $INTERVAL
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/vps-traffic-monitor/agent.log
+StandardError=append:/var/log/vps-traffic-monitor/agent.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now vps-traffic-agent.service
+echo "install done"
+"""
+
+    return """#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${1:-uninstall}"
+if [[ "$ACTION" != "uninstall" ]]; then
+  echo "unsupported action: $ACTION" >&2
+  exit 1
+fi
+
+systemctl disable --now vps-traffic-agent.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/vps-traffic-agent.service
+systemctl daemon-reload
+rm -rf /opt/vps-traffic-monitor /etc/vps-traffic-monitor
+rm -f /var/log/vps-traffic-monitor/agent.log
+
+echo "uninstall done"
+"""
+
+
 @app.get("/api/v1/nodes/{node_id}/config")
 def get_node_config(node_id: str):
     cfg = NODE_CONFIGS.get(node_id) or NodeConfig(node_id=node_id)
@@ -86,6 +177,14 @@ def update_node_config(node_id: str, update: ConfigUpdate):
     cfg = NodeConfig(node_id=node_id, **update.model_dump())
     NODE_CONFIGS[node_id] = cfg
     return {"ok": True, "config": asdict(cfg)}
+
+
+@app.get("/api/v1/nodes/{node_id}/scripts/{action}.sh")
+def get_node_script(node_id: str, action: str):
+    cfg = NODE_CONFIGS.get(node_id) or NodeConfig(node_id=node_id)
+    NODE_CONFIGS[node_id] = cfg
+    script = build_one_click_script(cfg, action)
+    return Response(content=script, media_type="text/x-shellscript")
 
 
 @app.post("/api/v1/ingest")
