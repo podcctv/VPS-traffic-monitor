@@ -194,14 +194,17 @@ def build_central_upgrade_script() -> str:
 set -euo pipefail
 
 ACTION="${1:-upgrade}"
+SELF_PATH="${SELF_PATH:-/usr/local/bin/vtm-central-upgrade}"
+REPO_URL="${REPO_URL:-https://github.com/podcctv/VPS-traffic-monitor.git}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/VPS-traffic-monitor}"
+BRANCH="${BRANCH:-main}"
+CENTRAL_URL="${CENTRAL_URL:-http://127.0.0.1:8000}"
+SCRIPT_URL="${SCRIPT_URL:-${CENTRAL_URL%/}/api/v1/central/scripts/upgrade.sh}"
+
 if [[ "$ACTION" != "upgrade" ]]; then
   echo "unsupported action: $ACTION" >&2
   exit 1
 fi
-
-REPO_URL="${REPO_URL:-https://github.com/podcctv/VPS-traffic-monitor.git}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/VPS-traffic-monitor}"
-BRANCH="${BRANCH:-main}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is not installed" >&2
@@ -216,11 +219,11 @@ fi
 if ! command -v git >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
-    apt-get install -y git
+    apt-get install -y git curl
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y git
+    dnf install -y git curl
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y git
+    yum install -y git curl
   else
     echo "git not found and unsupported package manager" >&2
     exit 1
@@ -239,6 +242,16 @@ fi
 cd "$INSTALL_DIR"
 docker compose pull || true
 docker compose up -d --build --remove-orphans
+
+# Optional: refresh local upgrade script file itself.
+if [[ -w "$(dirname "$SELF_PATH")" ]] && command -v curl >/dev/null 2>&1; then
+  tmp="$(mktemp)"
+  if curl -fsSL "$SCRIPT_URL" -o "$tmp"; then
+    install -m 0755 "$tmp" "$SELF_PATH"
+    echo "upgrade script refreshed: $SELF_PATH"
+  fi
+  rm -f "$tmp"
+fi
 
 echo "central upgrade done"
 """
