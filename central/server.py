@@ -187,6 +187,62 @@ echo "uninstall done"
 """
 
 
+
+
+def build_central_upgrade_script() -> str:
+    return """#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${1:-upgrade}"
+if [[ "$ACTION" != "upgrade" ]]; then
+  echo "unsupported action: $ACTION" >&2
+  exit 1
+fi
+
+REPO_URL="${REPO_URL:-https://github.com/podcctv/VPS-traffic-monitor.git}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/VPS-traffic-monitor}"
+BRANCH="${BRANCH:-main}"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is not installed" >&2
+  exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "docker compose plugin is required" >&2
+  exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y
+    apt-get install -y git
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y git
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y git
+  else
+    echo "git not found and unsupported package manager" >&2
+    exit 1
+  fi
+fi
+
+if [[ -d "$INSTALL_DIR/.git" ]]; then
+  git -C "$INSTALL_DIR" fetch --all --prune
+  git -C "$INSTALL_DIR" checkout "$BRANCH"
+  git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
+else
+  rm -rf "$INSTALL_DIR"
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+fi
+
+cd "$INSTALL_DIR"
+docker compose pull || true
+docker compose up -d --build --remove-orphans
+
+echo "central upgrade done"
+"""
+
 def _external_base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
@@ -228,11 +284,15 @@ def home_page():
 
     <p style="margin-top:1rem">
       <button onclick="quickSetup()">一键生成安装命令</button>
+      <button onclick="genCentralUpgrade()" style="margin-left:1rem;background:#0f766e">生成中心端升级命令</button>
       <a href="/docs" target="_blank" style="margin-left:1rem">查看 API 文档</a>
     </p>
 
     <p>安装命令（复制到目标 VPS 执行）：</p>
     <pre id="installCmd">点击“生成安装命令”后显示...</pre>
+
+    <p>中心端升级命令：</p>
+    <pre id="centralUpgradeCmd">点击“生成中心端升级命令”后显示...</pre>
 
     <p>当前配置：</p>
     <pre id="output">-</pre>
@@ -260,6 +320,11 @@ def home_page():
       document.getElementById('output').textContent = JSON.stringify(data.config, null, 2);
       document.getElementById('installCmd').textContent = data.install_command;
       loadDashboard();
+    }
+
+    async function genCentralUpgrade(){
+      const cmd = `curl -fsSL '${window.location.origin}/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade`;
+      document.getElementById('centralUpgradeCmd').textContent = cmd;
     }
 
     async function loadDashboard(){
@@ -333,6 +398,12 @@ def verify_node_login(node_id: str, payload: LoginVerifyRequest):
     if not verified:
         raise HTTPException(status_code=401, detail="invalid login token")
     return {"ok": True, "verify_enabled": True, "verified": True}
+
+
+@app.get("/api/v1/central/scripts/upgrade.sh")
+def get_central_upgrade_script():
+    script = build_central_upgrade_script()
+    return Response(content=script, media_type="text/x-shellscript")
 
 
 @app.get("/api/v1/dashboard")
