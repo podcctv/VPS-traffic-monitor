@@ -76,6 +76,8 @@ class QuickSetupRequest(BaseModel):
     node_id: str = Field(..., min_length=1)
     monthly_quota_gb: conint(ge=1, le=1024 * 1024)
     reset_day: conint(ge=1, le=31)
+    public_base_url: HttpUrl | None = None
+    agent_endpoint: HttpUrl | None = None
 
 
 class IngestPayload(BaseModel):
@@ -293,19 +295,29 @@ def home_page():
   <title>VPS 流量监控</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; margin: 2rem; background: #f8fafc; color: #0f172a; }
-    .card { max-width: 900px; background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .card { max-width: 980px; background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
     input, button { padding: .55rem .7rem; font-size: 15px; }
     button { cursor: pointer; border: 0; background: #2563eb; color: #fff; border-radius: 8px; }
     code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 4px; }
     pre { overflow: auto; background: #0b1020; color: #dbeafe; padding: 1rem; border-radius: 8px; }
+    table { width:100%; border-collapse: collapse; background: #fff; }
+    th, td { border: 1px solid #e2e8f0; padding: .45rem; text-align:left; font-size:14px; }
+    #authModal { position: fixed; inset: 0; background: rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; z-index:9999; }
+    #authPanel { width: 380px; background:#fff; border-radius:12px; padding:1rem; box-shadow: 0 10px 30px rgba(2,6,23,.28);}
   </style>
 </head>
 <body>
+  <div id="authModal" style="display:none">
+    <div id="authPanel">
+      <h3 style="margin:.2rem 0 1rem">管理员登录</h3>
+      <div id="authBox">检测登录状态中...</div>
+    </div>
+  </div>
   <div class="card">
     <h1>VPS 流量监控中心</h1>
-    <p><b>极简模式：</b>首次登录需要设置账号密码，登录后才可配置与查看。</p>
-    <div id="authBox" style="margin:.8rem 0;padding:.8rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc">检测登录状态中...</div>
+    <p><b>极简模式：</b>首次登录必须先设置管理员用户名/密码，未登录无法配置和查看展示界面。</p>
+    <div id="authSummary" style="margin:.8rem 0;padding:.6rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc">未登录</div>
 
     <div class="row">
       <div>
@@ -318,6 +330,15 @@ def home_page():
     <div style="margin-top:.8rem">
       <label>每月重置日期(1-31)</label><br><input id="resetDay" value="1" type="number" min="1" max="31"/>
     </div>
+    <div class="row" style="margin-top:.8rem">
+      <div>
+        <label>公网/反代访问地址（可选）</label><br><input id="publicBaseUrl" placeholder="https://monitor.example.com"/>
+      </div>
+      <div>
+        <label>节点上报地址（可选）</label><br><input id="agentEndpoint" placeholder="https://monitor.example.com/api/v1/ingest"/>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#475569">若已配置域名和反代，请填写公网地址；安装命令与节点配置将自动使用该域名，避免节点访问内网地址。</p>
 
     <p style="margin-top:1rem">
       <button onclick="quickSetup()">一键生成安装命令</button>
@@ -334,7 +355,7 @@ def home_page():
     <p>当前配置：</p>
     <pre id="output">-</pre>
     <p style="margin-top:1rem"><button onclick="loadDashboard()">刷新节点展示</button></p>
-    <pre id="dashboard">暂无上报数据</pre>
+    <div id="dashboardWrap">暂无上报数据</div>
   </div>
 
   <script>
@@ -342,12 +363,20 @@ def home_page():
       const res = await fetch('/api/v1/admin/status');
       const data = await res.json();
       const el = document.getElementById('authBox');
+      const modal = document.getElementById('authModal');
+      const summary = document.getElementById('authSummary');
       if(!data.initialized){
+        modal.style.display = 'flex';
+        summary.textContent = '未初始化管理员';
         el.innerHTML = `<b>首次初始化管理员</b><br><input id="adminUser" placeholder="用户名"/><input id="adminPass" type="password" placeholder="密码"/><button onclick="initAdmin()">初始化</button>`;
       } else if(!data.logged_in){
+        modal.style.display = 'flex';
+        summary.textContent = '未登录';
         el.innerHTML = `<b>请登录</b><br><input id="adminUser" placeholder="用户名"/><input id="adminPass" type="password" placeholder="密码"/><button onclick="loginAdmin()">登录</button>`;
       } else {
-        el.innerHTML = `已登录：<code>${data.username}</code>`;
+        modal.style.display = 'none';
+        summary.innerHTML = `已登录：<code>${data.username}</code>`;
+        el.innerHTML = '';
       }
     }
     async function initAdmin(){
@@ -367,7 +396,9 @@ def home_page():
       const payload = {
         node_id: document.getElementById('nodeId').value.trim(),
         monthly_quota_gb: Number(document.getElementById('quota').value || 0),
-        reset_day: Number(document.getElementById('resetDay').value || 0)
+        reset_day: Number(document.getElementById('resetDay').value || 0),
+        public_base_url: document.getElementById('publicBaseUrl').value.trim() || null,
+        agent_endpoint: document.getElementById('agentEndpoint').value.trim() || null
       };
       const res = await fetch('/api/v1/quick-setup', {
         method: 'POST',
@@ -391,8 +422,22 @@ def home_page():
 
     async function loadDashboard(){
       const res = await fetch('/api/v1/dashboard');
+      if(!res.ok){
+        document.getElementById('dashboardWrap').textContent = '请先登录后查看展示。';
+        return;
+      }
       const data = await res.json();
-      document.getElementById('dashboard').textContent = JSON.stringify(data, null, 2);
+      if(!data.nodes.length){
+        document.getElementById('dashboardWrap').textContent = '暂无节点配置';
+        return;
+      }
+      const latest = data.latest_ingest || {};
+      const rows = data.nodes.map(n => {
+        const li = latest[n.node_id] || {};
+        const used = li.counters && li.counters.total_gib ? `${li.counters.total_gib} GiB` : '-';
+        return `<tr><td>${n.node_id}</td><td>${n.monthly_quota_gb}</td><td>${n.reset_day}</td><td>${n.agent_endpoint}</td><td>${used}</td><td>${li.timestamp || '-'}</td></tr>`;
+      }).join('');
+      document.getElementById('dashboardWrap').innerHTML = `<table><thead><tr><th>节点</th><th>月配额(GB)</th><th>重置日</th><th>上报地址</th><th>当前累计</th><th>最后上报</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
     renderAuth();
@@ -435,6 +480,8 @@ def admin_login(payload: AdminCreds):
 def quick_setup(payload: QuickSetupRequest, request: Request, session: str | None = Cookie(default=None)):
     _require_admin(session)
     base = _external_base_url(request)
+    public_base = str(payload.public_base_url).rstrip("/") if payload.public_base_url else _script_base_url(request)
+    ingest_endpoint = str(payload.agent_endpoint) if payload.agent_endpoint else f"{base}/api/v1/ingest"
     node_id = payload.node_id.strip()
     api_key = f"node-{node_id}-{secrets.token_hex(4)}"
     hmac_secret = secrets.token_hex(16)
@@ -446,18 +493,17 @@ def quick_setup(payload: QuickSetupRequest, request: Request, session: str | Non
         reset_day=payload.reset_day,
         login_verify_enabled=True,
         login_verify_token=login_token,
-        install_script_url=f"{base}/agent/traffic_agent.py",
+        install_script_url=f"{public_base}/agent/traffic_agent.py",
         uninstall_script_url=f"{base}/api/v1/nodes/{node_id}/scripts/uninstall.sh",
-        agent_endpoint=f"{base}/api/v1/ingest",
+        agent_endpoint=ingest_endpoint,
         agent_api_key=api_key,
         agent_hmac_secret=hmac_secret,
     )
     NODE_CONFIGS[node_id] = cfg
     NODE_SECRETS[api_key] = {"hmac_secret": hmac_secret, "node_id": node_id}
 
-    script_base = _script_base_url(request)
     install_cmd = (
-        f"curl -fsSL '{script_base}/raw/{cfg.agent_api_key}/agent-bootstrap.sh' "
+        f"curl -fsSL '{public_base}/raw/{cfg.agent_api_key}/agent-bootstrap.sh' "
         f"| sudo NODE_ID={node_id} ENDPOINT={cfg.agent_endpoint} API_KEY={cfg.agent_api_key} HMAC_SECRET={cfg.agent_hmac_secret} bash -s -- install"
     )
     return {"ok": True, "config": asdict(cfg), "install_command": install_cmd}
