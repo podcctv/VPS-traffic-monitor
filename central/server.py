@@ -16,7 +16,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field, conint
+from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
 app = FastAPI(title="VPS Traffic Monitor Central API", version="0.1.0")
 
@@ -27,6 +27,8 @@ class NodeConfig:
     monthly_quota_gb: int = 1024
     reset_day: int = 1
     login_verify_enabled: bool = True
+    install_script_url: str | None = None
+    uninstall_script_url: str | None = None
 
 
 # demo in-memory stores (MVP)
@@ -41,6 +43,17 @@ class ConfigUpdate(BaseModel):
     monthly_quota_gb: conint(ge=1, le=1024 * 1024) = Field(..., description="Monthly traffic quota in GB")
     reset_day: conint(ge=1, le=31)
     login_verify_enabled: bool
+    install_script_url: HttpUrl | None = None
+    uninstall_script_url: HttpUrl | None = None
+
+    @field_validator("install_script_url", "uninstall_script_url")
+    @classmethod
+    def enforce_https(cls, value: HttpUrl | None) -> HttpUrl | None:
+        if value is None:
+            return value
+        if value.scheme != "https":
+            raise ValueError("script url must use https")
+        return value
 
 
 class IngestPayload(BaseModel):
