@@ -16,6 +16,7 @@ import os
 import secrets
 import shlex
 import time
+from urllib.parse import quote
 from dataclasses import dataclass, asdict
 from typing import Dict
 
@@ -369,7 +370,7 @@ def quick_setup(payload: QuickSetupRequest, request: Request, session: str | Non
     NODE_SECRETS[api_key] = {"hmac_secret": hmac_secret, "node_id": node_id}
 
     install_cmd = (
-        f"curl -fsSL '{public_base}/raw/{cfg.agent_api_key}/agent-bootstrap.sh' "
+        f"curl -fsSL '{public_base}/raw/{quote(cfg.agent_api_key, safe='')}/agent-bootstrap.sh' "
         f"| sudo NODE_ID={shlex.quote(node_id)} ENDPOINT={shlex.quote(cfg.agent_endpoint)} "
         f"API_KEY={shlex.quote(cfg.agent_api_key)} HMAC_SECRET={shlex.quote(cfg.agent_hmac_secret)} bash -s -- install"
     )
@@ -386,8 +387,9 @@ def raw_agent_bootstrap(api_key: str):
 
 @app.get("/api/v1/nodes/{node_id}/config")
 def get_node_config(node_id: str):
-    cfg = NODE_CONFIGS.get(node_id) or NodeConfig(node_id=node_id)
-    NODE_CONFIGS[node_id] = cfg
+    cfg = NODE_CONFIGS.get(node_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="node not found")
     return asdict(cfg)
 
 
@@ -400,16 +402,18 @@ def update_node_config(node_id: str, update: ConfigUpdate):
 
 @app.get("/api/v1/nodes/{node_id}/scripts/{action}.sh")
 def get_node_script(node_id: str, action: str):
-    cfg = NODE_CONFIGS.get(node_id) or NodeConfig(node_id=node_id)
-    NODE_CONFIGS[node_id] = cfg
+    cfg = NODE_CONFIGS.get(node_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="node not found")
     script = build_one_click_script(cfg, action)
     return Response(content=script, media_type="text/x-shellscript")
 
 
 @app.post("/api/v1/nodes/{node_id}/login-verify")
 def verify_node_login(node_id: str, payload: LoginVerifyRequest):
-    cfg = NODE_CONFIGS.get(node_id) or NodeConfig(node_id=node_id)
-    NODE_CONFIGS[node_id] = cfg
+    cfg = NODE_CONFIGS.get(node_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="node not found")
     if not cfg.login_verify_enabled:
         return {"ok": True, "verify_enabled": False, "verified": True, "reason": "verification disabled"}
     verified = secrets.compare_digest(payload.token, cfg.login_verify_token)
