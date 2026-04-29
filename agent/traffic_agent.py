@@ -19,6 +19,7 @@ import socket
 import subprocess
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from urllib import request
 
 
@@ -108,6 +109,24 @@ def post_payload(url: str, api_key: str, secret: str, payload: dict, timeout: in
         return resp.status, resp.read().decode()
 
 
+def get_node_config(config_url: str, timeout: int = 10) -> dict:
+    req = request.Request(url=config_url, method="GET")
+    with request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def run_one_click_from_config(config: dict, action: str) -> None:
+    field = "install_script_url" if action == "install" else "uninstall_script_url"
+    script_url = config.get(field)
+    if not script_url:
+        raise RuntimeError(f"central config missing {field}")
+    parsed = urlparse(script_url)
+    if parsed.scheme != "https":
+        raise RuntimeError("one-click script URL must use HTTPS")
+    cmd = f"curl -fsSL {script_url} | bash -s -- {action}"
+    subprocess.run(["bash", "-lc", cmd], check=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="vnStat agent uploader")
     parser.add_argument("--endpoint", required=True)
@@ -117,7 +136,25 @@ def main() -> int:
     parser.add_argument("--iface")
     parser.add_argument("--interval", type=int, default=0, help="seconds, 0=run once")
     parser.add_argument("--version", default="1.0.0")
+    parser.add_argument(
+        "--one-click",
+        choices=["install", "uninstall"],
+        help="fetch node config from central and execute install/uninstall script",
+    )
+    parser.add_argument(
+        "--config-endpoint-template",
+        default="{base}/api/v1/nodes/{node_id}/config",
+        help="template used to build config endpoint for --one-click",
+    )
     args = parser.parse_args()
+
+    if args.one_click:
+        endpoint_base = args.endpoint.rsplit("/api/v1/ingest", 1)[0]
+        config_url = args.config_endpoint_template.format(base=endpoint_base, node_id=args.node_id)
+        config = get_node_config(config_url)
+        run_one_click_from_config(config, args.one_click)
+        print(f"[{iso_now()}] one-click action={args.one_click} done")
+        return 0
 
     while True:
         data = run_vnstat_json()
