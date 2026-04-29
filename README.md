@@ -54,6 +54,24 @@ curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "central ok"
 
 如果开启防火墙，请放行 `8000/tcp`。
 
+
+
+## 中心端一键升级
+
+可在中心端页面点击“生成中心端升级命令”，或直接执行：
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade
+```
+
+支持环境变量：
+- `REPO_URL`：仓库地址（默认 `https://github.com/podcctv/VPS-traffic-monitor.git`）
+- `INSTALL_DIR`：部署目录（默认 `/opt/VPS-traffic-monitor`）
+- `BRANCH`：升级分支（默认 `main`）
+
+该脚本会自动更新仓库并执行 `docker compose up -d --build --remove-orphans`。
+
+
 ---
 
 ## 节点安装（Agent）
