@@ -286,10 +286,20 @@ def _script_base_url(request: Request) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_page():
-    return """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VPS 流量监控中心</title><script src="https://cdn.tailwindcss.com"></script><script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script></head>
+def public_page():
+    return """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VPS 流量星图</title><script src="https://cdn.tailwindcss.com"></script><script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script></head>
+<body class="min-h-screen bg-slate-950 text-slate-100"><div id="app" class="max-w-6xl mx-auto p-6 space-y-6">
+<div class="rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 shadow-2xl p-6"><div class="flex items-center justify-between gap-4"><div><h1 class="text-3xl font-black tracking-wide">🚀 VPS 流量星图</h1><p class="text-cyan-200 mt-1">公开展示页（无需登录）</p></div><div class="flex gap-2"><a href="/admin" class="px-4 py-2 rounded-lg bg-cyan-500 text-slate-900 font-bold">进入配置后台</a><button @click="loadBoard" class="px-4 py-2 rounded-lg bg-fuchsia-500 font-bold">刷新</button></div></div></div>
+<div class="grid md:grid-cols-3 gap-4"><div class="rounded-2xl p-5 bg-slate-900 border border-slate-700"><p class="text-slate-400">在线节点</p><p class="text-4xl font-black text-cyan-300">{{ stats.nodes }}</p></div><div class="rounded-2xl p-5 bg-slate-900 border border-slate-700"><p class="text-slate-400">总用量</p><p class="text-4xl font-black text-emerald-300">{{ stats.total }}</p></div><div class="rounded-2xl p-5 bg-slate-900 border border-slate-700"><p class="text-slate-400">最近更新</p><p class="text-xl font-bold text-fuchsia-300">{{ stats.latest }}</p></div></div>
+<div class="grid lg:grid-cols-2 gap-4"><div v-for="row in rows" :key="row.node_id" class="rounded-2xl p-5 bg-slate-900/80 border border-cyan-500/30 shadow-lg"><div class="flex items-center justify-between"><h3 class="text-xl font-bold">{{ row.node_id }}</h3><span class="text-xs px-2 py-1 rounded bg-cyan-400/20 text-cyan-200">{{ row.iface }}</span></div><p class="mt-4 text-3xl font-black text-emerald-300">{{ row.used }}</p><p class="text-slate-400 mt-1">月配额 {{ row.monthly_quota_gb }} GB · 重置日 {{ row.reset_day }}</p><div class="mt-3 h-2 rounded bg-slate-700"><div class="h-2 rounded bg-gradient-to-r from-cyan-400 to-fuchsia-500" :style="{width: row.percent + '%'}"></div></div><p class="text-xs text-slate-500 mt-2">最后上报：{{ row.timestamp }}</p></div><div v-if="rows.length===0" class="rounded-2xl p-6 border border-dashed border-slate-600 text-slate-400">暂无数据，请稍后刷新。</div></div></div>
+<script>const {createApp}=Vue;createApp({data(){return{rows:[],stats:{nodes:0,total:'0 GiB',latest:'-'}}},methods:{async loadBoard(){const res=await fetch('/api/v1/public-dashboard');if(!res.ok){this.rows=[];return;}const data=await res.json();let sum=0,latest='-';this.rows=(data.nodes||[]).map(n=>{const li=(data.latest_ingest||{})[n.node_id]||{};const used=Number((li.counters&&li.counters.total_gib)||0);sum+=used;if(li.timestamp&&li.timestamp>latest){latest=li.timestamp;}const percent=Math.min(100,Math.round((used/Math.max(1,n.monthly_quota_gb))*100));return {...n,used:`${used.toFixed(2)} GiB`,iface:li.iface||n.agent_iface||'-',timestamp:li.timestamp||'-',percent};});this.stats={nodes:this.rows.length,total:`${sum.toFixed(2)} GiB`,latest};}},async mounted(){await this.loadBoard();setInterval(this.loadBoard,15000);}}).mount('#app');</script></body></html>"""
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VPS 流量监控中心（配置后台）</title><script src="https://cdn.tailwindcss.com"></script><script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script></head>
 <body class="bg-slate-100 text-slate-800"><div id="app" class="max-w-6xl mx-auto p-6">
-<div class="bg-white rounded-2xl shadow-xl p-6 space-y-5"><div class="flex items-center justify-between"><h1 class="text-2xl font-bold">VPS 流量监控中心</h1><a href="/docs" target="_blank" class="text-blue-600">API 文档</a></div>
+<div class="bg-white rounded-2xl shadow-xl p-6 space-y-5"><div class="flex items-center justify-between"><h1 class="text-2xl font-bold">VPS 流量监控中心（配置后台）</h1><div class="flex gap-4"><a href="/" class="text-fuchsia-700">公开展示页</a><a href="/docs" target="_blank" class="text-blue-600">API 文档</a></div></div>
 <div class="rounded-lg border px-4 py-3 bg-slate-50">状态：<span class="font-semibold">{{ authSummary }}</span></div>
 <div class="grid md:grid-cols-2 gap-4"><label class="space-y-1"><span>节点 ID</span><input v-model="form.node_id" class="w-full border rounded px-3 py-2"></label><label class="space-y-1"><span>月流量配额(GB)</span><input v-model.number="form.monthly_quota_gb" type="number" min="1" class="w-full border rounded px-3 py-2"></label></div>
 <div class="grid md:grid-cols-3 gap-4"><label class="space-y-1"><span>重置日(1-31)</span><input v-model.number="form.reset_day" type="number" min="1" max="31" class="w-full border rounded px-3 py-2"></label><label class="space-y-1 md:col-span-2"><span>公网地址（可选）</span><input v-model="form.public_base_url" placeholder="https://monitor.example.com" class="w-full border rounded px-3 py-2"></label></div>
@@ -301,8 +311,6 @@ def home_page():
 <script>
 const {createApp}=Vue;createApp({data(){return{authInitialized:false,loggedIn:false,authSummary:'检测中...',showAuth:true,authMode:'init',admin:{username:'',password:''},form:{node_id:'demo-node',monthly_quota_gb:1024,reset_day:1,public_base_url:'',agent_endpoint:''},installCmd:'点击“生成安装命令”后显示...',centralUpgradeCmd:'点击“生成中心端升级命令”后显示...',outputText:'-',rows:[]}},computed:{authTitle(){return this.authMode==='init'?'首次初始化管理员':'管理员登录'},authAction(){return this.authMode==='init'?'初始化':'登录'}},methods:{async renderAuth(){const res=await fetch('/api/v1/admin/status');const data=await res.json();this.authInitialized=data.initialized;this.loggedIn=data.logged_in;this.authMode=!data.initialized?'init':'login';this.showAuth=!(data.initialized&&data.logged_in);this.authSummary=!data.initialized?'未初始化管理员':(data.logged_in?`已登录：${data.username}`:'未登录');},async submitAuth(){const api=this.authMode==='init'?'/api/v1/admin/init':'/api/v1/admin/login';const res=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.admin)});if(!res.ok){alert(`${this.authAction}失败`);return;}await this.renderAuth();await this.loadDashboard();},async quickSetup(){const payload={...this.form,public_base_url:this.form.public_base_url.trim()||null,agent_endpoint:this.form.agent_endpoint.trim()||null};const res=await fetch('/api/v1/quick-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();this.outputText=JSON.stringify(res.ok?data.config:data,null,2);if(res.ok){this.installCmd=data.install_command;await this.loadDashboard();}},genCentralUpgrade(){this.centralUpgradeCmd=`curl -fsSL '${window.location.origin}/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade`;},async loadDashboard(){const res=await fetch('/api/v1/dashboard');if(!res.ok){this.rows=[];return;}const data=await res.json();const latest=data.latest_ingest||{};this.rows=(data.nodes||[]).map(n=>{const li=latest[n.node_id]||{};return{...n,used:(li.counters&&li.counters.total_gib)?`${li.counters.total_gib} GiB`:'-',timestamp:li.timestamp||'-'}});}},async mounted(){await this.renderAuth();await this.loadDashboard();}}).mount('#app');
 </script></body></html>"""
-
-
 @app.get("/api/v1/admin/status")
 def admin_status(session: str | None = Cookie(default=None)):
     return {"initialized": bool(ADMIN_STATE["password_hash"]), "logged_in": bool(session in ADMIN_SESSIONS), "username": ADMIN_STATE["username"]}
@@ -411,6 +419,11 @@ def verify_node_login(node_id: str, payload: LoginVerifyRequest):
 def get_central_upgrade_script():
     script = build_central_upgrade_script()
     return Response(content=script, media_type="text/x-shellscript")
+
+
+@app.get("/api/v1/public-dashboard")
+def public_dashboard():
+    return {"nodes": [{"node_id": cfg.node_id, "monthly_quota_gb": cfg.monthly_quota_gb, "reset_day": cfg.reset_day, "agent_iface": cfg.agent_iface} for cfg in NODE_CONFIGS.values()], "latest_ingest": LATEST_INGEST}
 
 
 @app.get("/api/v1/dashboard")
