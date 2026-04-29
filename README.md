@@ -1,51 +1,73 @@
 # VPS Traffic Monitor MVP
 
-## 极简目标（你现在可以这样用）
+## 先回答：当前 `docker-compose.yml` 能不能直接运行？
 
-中心端通过 Docker 一键安装后，你登录网页只需要做 3 件事：
+**结论：不能直接按注释里的“一键拉取并启动”方式运行。**
 
-1. 填写节点 ID
-2. 填写节点月流量（GB）
-3. 填写每月重置日期（1-31）
-
-点击 **「一键生成安装命令」**，系统会自动：
-
-- 生成并保存该节点完整配置
-- 自动生成 API Key/HMAC 密钥
-- 自动拼好 Agent 上报地址与脚本地址
-- 给出可直接复制的 VPS 安装命令
+原因：当前 compose 使用的是 `build: .`，这要求你本地有完整项目源码目录；但注释中的方式只是下载一个 `docker-compose.yml` 文件，没有 `Dockerfile` 与源码上下文，因此构建会失败。
 
 ---
 
-## 1) 中心端一键安装（Docker）
+## 安装方式 A（推荐）：从 Git 拉取后启动
+
+适用于你自己部署、最稳妥也最容易排查问题。
+
+### 1）准备环境
+
+- Linux 服务器（Ubuntu/Debian/CentOS 均可）
+- 已安装 Docker + Docker Compose Plugin
+
+快速检查：
+
+```bash
+docker --version
+docker compose version
+```
+
+### 2）拉取项目
+
+```bash
+git clone https://github.com/<your-org>/<your-repo>.git
+cd <your-repo>
+```
+
+### 3）启动中心端
 
 ```bash
 docker compose up -d --build
 ```
 
-验证：
+### 4）验证服务
 
 ```bash
-curl -s http://127.0.0.1:8000/docs >/dev/null && echo ok
+curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "central ok"
+```
+
+如果服务器开了防火墙，请放行 `8000/tcp`。
+
+### 5）访问页面
+
+浏览器打开：
+
+`http://你的服务器IP:8000/`
+
+然后按页面提示：填写节点 ID、月流量、重置日，点击**一键生成安装命令**即可。
+
+---
+
+## 安装方式 B：仅下载 compose 一键启动（前提：你已发布镜像）
+
+只有在你把镜像发布到仓库（例如 GHCR / Docker Hub）并把 `docker-compose.yml` 中 `image:` 改成真实地址后，这种方式才可用。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<your-org>/<your-repo>/main/docker-compose.yml -o docker-compose.yml \
+  && docker compose -f docker-compose.yml pull \
+  && docker compose -f docker-compose.yml up -d
 ```
 
 ---
 
-## 2) 网页极简配置（推荐）
-
-打开：`http://你的中心端IP:8000/`
-
-在首页输入：
-
-- 节点 ID
-- 月流量配额（GB）
-- 重置日
-
-点击 **一键生成安装命令**，复制命令到目标 VPS 执行即可。
-
----
-
-## 3) Agent 一键安装（目标 VPS 执行）
+## Agent 一键安装（目标 VPS 执行）
 
 示例（以网页生成结果为准）：
 
@@ -61,9 +83,9 @@ curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/unin
 
 ---
 
-## 4) API 方式（可选）
+## API 方式（可选）
 
-如果你不走网页，也可以调这个极简接口：
+如果你不走网页，也可以调这个接口：
 
 `POST /api/v1/quick-setup`
 
