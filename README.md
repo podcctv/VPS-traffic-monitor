@@ -115,7 +115,7 @@ chmod +x /usr/local/bin/vtm-central
 
 ```bash
 curl -fsSL 'https://your-central.example.com/raw/<api-key>/agent-bootstrap.sh' \
-  | sudo NODE_ID=demo-node ENDPOINT=https://your-central.example.com/api/v1/ingest API_KEY=<api-key> HMAC_SECRET=<hmac-secret> bash -s -- install
+  | sudo NODE_ID='demo-node' ENDPOINT='https://your-central.example.com/api/v1/ingest' API_KEY='<api-key>' HMAC_SECRET='<hmac-secret>' bash -s -- install
 ```
 
 升级示例（会 `git fetch/reset` 并刷新本地脚本自身）：
@@ -129,6 +129,8 @@ bash /usr/local/bin/vtm-agent upgrade
 ```bash
 bash /usr/local/bin/vtm-agent uninstall
 ```
+
+后台支持“远程卸载客户端”按钮：中心端下发卸载动作，节点在下一次上报后自动执行 `uninstall`，包括停服务、删除 systemd 单元、删除配置与日志文件。
 
 ---
 
