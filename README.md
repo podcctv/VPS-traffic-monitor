@@ -56,31 +56,54 @@ curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "central ok"
 
 
 
-## 中心端一键升级
+## 中心端一键脚本（安装 / 升级 / 卸载）
 
-可在中心端页面点击“生成中心端升级命令”，或直接执行：
+中心端支持通过一键脚本完成：
+- 安装（install）
+- 升级（upgrade）
+- 卸载（uninstall）
+
+你可以在中心端页面生成命令，也可以直接使用下面的方式：
+
+### 1) 安装
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- install
+```
+
+### 2) 升级
 
 ```bash
 curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade
 ```
 
+### 3) 卸载
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- uninstall
+```
+
 支持环境变量：
 - `REPO_URL`：仓库地址（默认 `https://github.com/podcctv/VPS-traffic-monitor.git`）
 - `INSTALL_DIR`：部署目录（默认 `/opt/VPS-traffic-monitor`）
-- `BRANCH`：升级分支（默认 `main`）
+- `BRANCH`：分支（默认 `main`）
 
-该脚本会自动更新仓库并执行 `docker compose up -d --build --remove-orphans`。
+### 脚本工作方式
 
-如果你希望本地持久化一个“可自我更新”的升级脚本，可先保存后执行：
+- 一键脚本会通过 `git` 将仓库下载到本地目录。
+- 升级时会更新本地 `git` 仓库内容，并重建/重启容器。
+- 脚本支持“自更新”：会优先刷新脚本本身，再执行 install/upgrade/uninstall。
+- 因此它既可以更新自己，也可以更新 `git` 目录中的全部项目文件。
+
+如果你希望本地持久化一个“可自我更新”的命令，可先保存后执行：
 
 ```bash
-curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' -o /usr/local/bin/vtm-central-upgrade
-chmod +x /usr/local/bin/vtm-central-upgrade
-/usr/local/bin/vtm-central-upgrade upgrade
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' -o /usr/local/bin/vtm-central
+chmod +x /usr/local/bin/vtm-central
+/usr/local/bin/vtm-central upgrade
 ```
 
-后续每次运行时会尝试刷新 `/usr/local/bin/vtm-central-upgrade` 本身。
-
+后续每次运行 `/usr/local/bin/vtm-central` 时都会优先尝试刷新该脚本本身。
 
 ---
 
