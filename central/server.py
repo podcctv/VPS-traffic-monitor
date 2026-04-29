@@ -287,164 +287,20 @@ def _script_base_url(request: Request) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def home_page():
-    return """<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>VPS 流量监控</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; margin: 2rem; background: #f8fafc; color: #0f172a; }
-    .card { max-width: 980px; background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
-    input, button { padding: .55rem .7rem; font-size: 15px; }
-    button { cursor: pointer; border: 0; background: #2563eb; color: #fff; border-radius: 8px; }
-    code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 4px; }
-    pre { overflow: auto; background: #0b1020; color: #dbeafe; padding: 1rem; border-radius: 8px; }
-    table { width:100%; border-collapse: collapse; background: #fff; }
-    th, td { border: 1px solid #e2e8f0; padding: .45rem; text-align:left; font-size:14px; }
-    #authModal { position: fixed; inset: 0; background: rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; z-index:9999; }
-    #authPanel { width: 380px; background:#fff; border-radius:12px; padding:1rem; box-shadow: 0 10px 30px rgba(2,6,23,.28);}
-  </style>
-</head>
-<body>
-  <div id="authModal" style="display:none">
-    <div id="authPanel">
-      <h3 style="margin:.2rem 0 1rem">管理员登录</h3>
-      <div id="authBox">检测登录状态中...</div>
-    </div>
-  </div>
-  <div class="card">
-    <h1>VPS 流量监控中心</h1>
-    <p><b>极简模式：</b>首次登录必须先设置管理员用户名/密码，未登录无法配置和查看展示界面。</p>
-    <div id="authSummary" style="margin:.8rem 0;padding:.6rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc">未登录</div>
-
-    <div class="row">
-      <div>
-        <label>节点 ID</label><br><input id="nodeId" value="demo-node"/>
-      </div>
-      <div>
-        <label>月流量配额(GB)</label><br><input id="quota" value="1024" type="number" min="1"/>
-      </div>
-    </div>
-    <div style="margin-top:.8rem">
-      <label>每月重置日期(1-31)</label><br><input id="resetDay" value="1" type="number" min="1" max="31"/>
-    </div>
-    <div class="row" style="margin-top:.8rem">
-      <div>
-        <label>公网/反代访问地址（可选）</label><br><input id="publicBaseUrl" placeholder="https://monitor.example.com"/>
-      </div>
-      <div>
-        <label>节点上报地址（可选）</label><br><input id="agentEndpoint" placeholder="https://monitor.example.com/api/v1/ingest"/>
-      </div>
-    </div>
-    <p style="font-size:13px;color:#475569">若已配置域名和反代，请填写公网地址；安装命令与节点配置将自动使用该域名，避免节点访问内网地址。</p>
-
-    <p style="margin-top:1rem">
-      <button onclick="quickSetup()">一键生成安装命令</button>
-      <button onclick="genCentralUpgrade()" style="margin-left:1rem;background:#0f766e">生成中心端升级命令</button>
-      <a href="/docs" target="_blank" style="margin-left:1rem">查看 API 文档</a>
-    </p>
-
-    <p>安装命令（复制到目标 VPS 执行）：</p>
-    <pre id="installCmd">点击“生成安装命令”后显示...</pre>
-
-    <p>中心端升级命令：</p>
-    <pre id="centralUpgradeCmd">点击“生成中心端升级命令”后显示...</pre>
-
-    <p>当前配置：</p>
-    <pre id="output">-</pre>
-    <p style="margin-top:1rem"><button onclick="loadDashboard()">刷新节点展示</button></p>
-    <div id="dashboardWrap">暂无上报数据</div>
-  </div>
-
-  <script>
-    async function renderAuth(){
-      const res = await fetch('/api/v1/admin/status');
-      const data = await res.json();
-      const el = document.getElementById('authBox');
-      const modal = document.getElementById('authModal');
-      const summary = document.getElementById('authSummary');
-      if(!data.initialized){
-        modal.style.display = 'flex';
-        summary.textContent = '未初始化管理员';
-        el.innerHTML = `<b>首次初始化管理员</b><br><input id="adminUser" placeholder="用户名"/><input id="adminPass" type="password" placeholder="密码"/><button onclick="initAdmin()">初始化</button>`;
-      } else if(!data.logged_in){
-        modal.style.display = 'flex';
-        summary.textContent = '未登录';
-        el.innerHTML = `<b>请登录</b><br><input id="adminUser" placeholder="用户名"/><input id="adminPass" type="password" placeholder="密码"/><button onclick="loginAdmin()">登录</button>`;
-      } else {
-        modal.style.display = 'none';
-        summary.innerHTML = `已登录：<code>${data.username}</code>`;
-        el.innerHTML = '';
-      }
-    }
-    async function initAdmin(){
-      const payload = {username: document.getElementById('adminUser').value, password: document.getElementById('adminPass').value};
-      const res = await fetch('/api/v1/admin/init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      if(!res.ok){ alert('初始化失败'); return; }
-      renderAuth();
-    }
-    async function loginAdmin(){
-      const payload = {username: document.getElementById('adminUser').value, password: document.getElementById('adminPass').value};
-      const res = await fetch('/api/v1/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      if(!res.ok){ alert('登录失败'); return; }
-      renderAuth();
-      loadDashboard();
-    }
-    async function quickSetup(){
-      const payload = {
-        node_id: document.getElementById('nodeId').value.trim(),
-        monthly_quota_gb: Number(document.getElementById('quota').value || 0),
-        reset_day: Number(document.getElementById('resetDay').value || 0),
-        public_base_url: document.getElementById('publicBaseUrl').value.trim() || null,
-        agent_endpoint: document.getElementById('agentEndpoint').value.trim() || null
-      };
-      const res = await fetch('/api/v1/quick-setup', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if(!res.ok){
-        document.getElementById('output').textContent = JSON.stringify(data, null, 2);
-        return;
-      }
-      document.getElementById('output').textContent = JSON.stringify(data.config, null, 2);
-      document.getElementById('installCmd').textContent = data.install_command;
-      loadDashboard();
-    }
-
-    async function genCentralUpgrade(){
-      const cmd = `curl -fsSL '${window.location.origin}/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade`;
-      document.getElementById('centralUpgradeCmd').textContent = cmd;
-    }
-
-    async function loadDashboard(){
-      const res = await fetch('/api/v1/dashboard');
-      if(!res.ok){
-        document.getElementById('dashboardWrap').textContent = '请先登录后查看展示。';
-        return;
-      }
-      const data = await res.json();
-      if(!data.nodes.length){
-        document.getElementById('dashboardWrap').textContent = '暂无节点配置';
-        return;
-      }
-      const latest = data.latest_ingest || {};
-      const rows = data.nodes.map(n => {
-        const li = latest[n.node_id] || {};
-        const used = li.counters && li.counters.total_gib ? `${li.counters.total_gib} GiB` : '-';
-        return `<tr><td>${n.node_id}</td><td>${n.monthly_quota_gb}</td><td>${n.reset_day}</td><td>${n.agent_endpoint}</td><td>${used}</td><td>${li.timestamp || '-'}</td></tr>`;
-      }).join('');
-      document.getElementById('dashboardWrap').innerHTML = `<table><thead><tr><th>节点</th><th>月配额(GB)</th><th>重置日</th><th>上报地址</th><th>当前累计</th><th>最后上报</th></tr></thead><tbody>${rows}</tbody></table>`;
-    }
-
-    renderAuth();
-    loadDashboard();
-  </script>
-</body>
-</html>"""
+    return """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VPS 流量监控中心</title><script src="https://cdn.tailwindcss.com"></script><script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script></head>
+<body class="bg-slate-100 text-slate-800"><div id="app" class="max-w-6xl mx-auto p-6">
+<div class="bg-white rounded-2xl shadow-xl p-6 space-y-5"><div class="flex items-center justify-between"><h1 class="text-2xl font-bold">VPS 流量监控中心</h1><a href="/docs" target="_blank" class="text-blue-600">API 文档</a></div>
+<div class="rounded-lg border px-4 py-3 bg-slate-50">状态：<span class="font-semibold">{{ authSummary }}</span></div>
+<div class="grid md:grid-cols-2 gap-4"><label class="space-y-1"><span>节点 ID</span><input v-model="form.node_id" class="w-full border rounded px-3 py-2"></label><label class="space-y-1"><span>月流量配额(GB)</span><input v-model.number="form.monthly_quota_gb" type="number" min="1" class="w-full border rounded px-3 py-2"></label></div>
+<div class="grid md:grid-cols-3 gap-4"><label class="space-y-1"><span>重置日(1-31)</span><input v-model.number="form.reset_day" type="number" min="1" max="31" class="w-full border rounded px-3 py-2"></label><label class="space-y-1 md:col-span-2"><span>公网地址（可选）</span><input v-model="form.public_base_url" placeholder="https://monitor.example.com" class="w-full border rounded px-3 py-2"></label></div>
+<label class="space-y-1 block"><span>节点上报地址（可选）</span><input v-model="form.agent_endpoint" placeholder="https://monitor.example.com/api/v1/ingest" class="w-full border rounded px-3 py-2"></label>
+<div class="flex flex-wrap gap-3"><button @click="quickSetup" class="bg-blue-600 text-white px-4 py-2 rounded">生成安装命令</button><button @click="genCentralUpgrade" class="bg-emerald-700 text-white px-4 py-2 rounded">生成中心端升级命令</button><button @click="loadDashboard" class="bg-slate-700 text-white px-4 py-2 rounded">刷新节点展示</button></div>
+<pre class="bg-slate-900 text-slate-100 p-3 rounded overflow-auto">安装命令：\n{{ installCmd }}</pre><pre class="bg-slate-900 text-slate-100 p-3 rounded overflow-auto">中心端升级命令：\n{{ centralUpgradeCmd }}</pre><pre class="bg-slate-900 text-slate-100 p-3 rounded overflow-auto">当前配置：\n{{ outputText }}</pre>
+<div class="overflow-auto"><table class="w-full text-sm border"><thead class="bg-slate-100"><tr><th class="border p-2">节点</th><th class="border p-2">月配额</th><th class="border p-2">重置日</th><th class="border p-2">上报地址</th><th class="border p-2">当前累计</th><th class="border p-2">最后上报</th></tr></thead><tbody><tr v-if="rows.length===0"><td colspan="6" class="border p-3 text-center text-slate-500">暂无节点配置</td></tr><tr v-for="row in rows" :key="row.node_id"><td class="border p-2">{{row.node_id}}</td><td class="border p-2">{{row.monthly_quota_gb}}</td><td class="border p-2">{{row.reset_day}}</td><td class="border p-2">{{row.agent_endpoint}}</td><td class="border p-2">{{row.used}}</td><td class="border p-2">{{row.timestamp}}</td></tr></tbody></table></div></div>
+<div v-if="showAuth" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center"><div class="bg-white rounded-xl p-6 w-80 space-y-3"><h3 class="text-lg font-bold">{{ authTitle }}</h3><input v-model="admin.username" placeholder="用户名" class="w-full border rounded px-3 py-2"><input v-model="admin.password" type="password" placeholder="密码" class="w-full border rounded px-3 py-2"><button @click="submitAuth" class="w-full bg-blue-600 text-white py-2 rounded">{{ authAction }}</button></div></div></div>
+<script>
+const {createApp}=Vue;createApp({data(){return{authInitialized:false,loggedIn:false,authSummary:'检测中...',showAuth:true,authMode:'init',admin:{username:'',password:''},form:{node_id:'demo-node',monthly_quota_gb:1024,reset_day:1,public_base_url:'',agent_endpoint:''},installCmd:'点击“生成安装命令”后显示...',centralUpgradeCmd:'点击“生成中心端升级命令”后显示...',outputText:'-',rows:[]}},computed:{authTitle(){return this.authMode==='init'?'首次初始化管理员':'管理员登录'},authAction(){return this.authMode==='init'?'初始化':'登录'}},methods:{async renderAuth(){const res=await fetch('/api/v1/admin/status');const data=await res.json();this.authInitialized=data.initialized;this.loggedIn=data.logged_in;this.authMode=!data.initialized?'init':'login';this.showAuth=!(data.initialized&&data.logged_in);this.authSummary=!data.initialized?'未初始化管理员':(data.logged_in?`已登录：${data.username}`:'未登录');},async submitAuth(){const api=this.authMode==='init'?'/api/v1/admin/init':'/api/v1/admin/login';const res=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.admin)});if(!res.ok){alert(`${this.authAction}失败`);return;}await this.renderAuth();await this.loadDashboard();},async quickSetup(){const payload={...this.form,public_base_url:this.form.public_base_url.trim()||null,agent_endpoint:this.form.agent_endpoint.trim()||null};const res=await fetch('/api/v1/quick-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();this.outputText=JSON.stringify(res.ok?data.config:data,null,2);if(res.ok){this.installCmd=data.install_command;await this.loadDashboard();}},genCentralUpgrade(){this.centralUpgradeCmd=`curl -fsSL '${window.location.origin}/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade`;},async loadDashboard(){const res=await fetch('/api/v1/dashboard');if(!res.ok){this.rows=[];return;}const data=await res.json();const latest=data.latest_ingest||{};this.rows=(data.nodes||[]).map(n=>{const li=latest[n.node_id]||{};return{...n,used:(li.counters&&li.counters.total_gib)?`${li.counters.total_gib} GiB`:'-',timestamp:li.timestamp||'-'}});}},async mounted(){await this.renderAuth();await this.loadDashboard();}}).mount('#app');
+</script></body></html>"""
 
 
 @app.get("/api/v1/admin/status")
