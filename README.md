@@ -9,9 +9,11 @@
 ## 功能概览
 
 - 节点配置管理（节点 ID、月流量配额、重置日）
-- 自动生成节点安装/卸载脚本命令
+- 自动生成节点安装命令（直接执行 Bash 脚本）
+- 节点脚本支持 `install / upgrade / uninstall`，并支持通过 `git` 升级本地文件与脚本自身
 - 流量数据上报接口（支持 API Key + HMAC）
 - 登录校验接口（可按节点开关 + token 校验）
+- Web 首次登录强制设置管理员账号密码，登录后才能配置与查看
 - Web 页面查看节点状态与用量
 - Docker Compose 一键启动中心端
 
@@ -109,16 +111,23 @@ chmod +x /usr/local/bin/vtm-central
 
 ## 节点安装（Agent）
 
-在中心端页面填写节点信息后，可获得一键安装命令。示例：
+在中心端页面填写节点信息后，可获得一键安装命令（直接 Bash，不依赖中心端动态生成安装脚本）。示例：
 
 ```bash
-curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/install.sh' | sudo bash -s -- install
+curl -fsSL 'https://your-central.example.com/raw/<api-key>/agent-bootstrap.sh' \
+  | sudo NODE_ID=demo-node ENDPOINT=https://your-central.example.com/api/v1/ingest API_KEY=<api-key> HMAC_SECRET=<hmac-secret> bash -s -- install
+```
+
+升级示例（会 `git fetch/reset` 并刷新本地脚本自身）：
+
+```bash
+bash /usr/local/bin/vtm-agent upgrade
 ```
 
 卸载示例：
 
 ```bash
-curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/uninstall.sh' | sudo bash -s -- uninstall
+bash /usr/local/bin/vtm-agent uninstall
 ```
 
 ---
