@@ -71,6 +71,16 @@ curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' |
 
 该脚本会自动更新仓库并执行 `docker compose up -d --build --remove-orphans`。
 
+如果你希望本地持久化一个“可自我更新”的升级脚本，可先保存后执行：
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' -o /usr/local/bin/vtm-central-upgrade
+chmod +x /usr/local/bin/vtm-central-upgrade
+/usr/local/bin/vtm-central-upgrade upgrade
+```
+
+后续每次运行时会尝试刷新 `/usr/local/bin/vtm-central-upgrade` 本身。
+
 
 ---
 
