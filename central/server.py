@@ -17,6 +17,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict
 
 from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
 app = FastAPI(title="VPS Traffic Monitor Central API", version="0.2.0")
@@ -174,6 +175,54 @@ rm -f /var/log/vps-traffic-monitor/agent.log
 echo "uninstall done"
 """
 
+
+@app.get("/", response_class=HTMLResponse)
+def home_page():
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VPS 流量监控</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; margin: 2rem; background: #f8fafc; color: #0f172a; }
+    .card { max-width: 840px; background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    input, button { padding: .55rem .7rem; font-size: 15px; }
+    button { cursor: pointer; border: 0; background: #2563eb; color: #fff; border-radius: 8px; }
+    code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 4px; }
+    pre { overflow: auto; background: #0b1020; color: #dbeafe; padding: 1rem; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>VPS 流量监控中心</h1>
+    <p>输入节点 ID 后可直接查询配置接口，便于快速检查部署状态。</p>
+    <p>API 文档：<a href="/docs" target="_blank">/docs</a></p>
+
+    <label for="nodeId">节点 ID：</label>
+    <input id="nodeId" value="demo-node" />
+    <button onclick="loadConfig()">查询配置</button>
+
+    <p style="margin-top:1rem">接口：<code id="url">/api/v1/nodes/demo-node/config</code></p>
+    <pre id="output">点击“查询配置”后显示结果...</pre>
+  </div>
+
+  <script>
+    async function loadConfig(){
+      const nodeId = document.getElementById('nodeId').value.trim() || 'demo-node';
+      const url = `/api/v1/nodes/${encodeURIComponent(nodeId)}/config`;
+      document.getElementById('url').textContent = url;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        document.getElementById('output').textContent = `请求失败: ${e}`;
+      }
+    }
+  </script>
+</body>
+</html>"""
 
 @app.get("/api/v1/nodes/{node_id}/config")
 def get_node_config(node_id: str):
