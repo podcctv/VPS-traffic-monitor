@@ -1,10 +1,11 @@
-# 一键拉取并启动（在服务器执行）
-# curl -fsSL https://raw.githubusercontent.com/<your-org>/<your-repo>/main/docker-compose.yml -o docker-compose.yml \
-#   && docker compose pull \
-#   && docker compose up -d
+# 说明：
+# 1) 从 Git 拉取源码部署：直接使用本文件，执行 `docker compose up -d --build`
+# 2) 仅下载本文件一键部署：请先把 image 改成你已发布的镜像地址，再执行 pull + up
 
 services:
   central:
+    # 发布镜像后可改为：ghcr.io/<your-org>/<your-repo>:latest
+    image: vps-traffic-central:local
     build: .
     container_name: vps-traffic-central
     ports:
