@@ -1,81 +1,69 @@
-# VPS Traffic Monitor MVP
+# VPS Traffic Monitor
 
-## 先回答：当前 `docker-compose.yml` 能不能直接运行？
-
-**结论：不能直接按注释里的“一键拉取并启动”方式运行。**
-
-原因：当前 compose 使用的是 `build: .`，这要求你本地有完整项目源码目录；但注释中的方式只是下载一个 `docker-compose.yml` 文件，没有 `Dockerfile` 与源码上下文，因此构建会失败。
+一个用于 **VPS 流量采集、上报与可视化** 的轻量级项目：
+- **Central（中心端）**：提供配置管理、安装脚本生成、数据接收与展示页面。
+- **Agent（节点端）**：部署在各 VPS 上，定时采集网卡流量并上报到中心端。
 
 ---
 
-## 安装方式 A（推荐）：从 Git 拉取后启动
+## 功能概览
 
-适用于你自己部署、最稳妥也最容易排查问题。
+- 节点配置管理（节点 ID、月流量配额、重置日）
+- 自动生成节点安装/卸载脚本命令
+- 流量数据上报接口（支持 API Key + HMAC）
+- Web 页面查看节点状态与用量
+- Docker Compose 一键启动中心端
 
-### 1）准备环境
+---
 
-- Linux 服务器（Ubuntu/Debian/CentOS 均可）
-- 已安装 Docker + Docker Compose Plugin
+## 运行要求
 
-快速检查：
+- Linux 服务器（推荐 Ubuntu / Debian）
+- Docker 24+
+- Docker Compose Plugin
+
+环境检查：
 
 ```bash
 docker --version
 docker compose version
 ```
 
-### 2）拉取项目
+---
+
+## 快速开始（推荐）
+
+> 当前 `docker-compose.yml` 使用 `build: .`，因此**必须先克隆完整仓库**再启动。
 
 ```bash
-git clone https://github.com/<your-org>/<your-repo>.git
-cd <your-repo>
-```
-
-### 3）启动中心端
-
-```bash
+git clone https://github.com/podcctv/VPS-traffic-monitor.git
+cd VPS-traffic-monitor
 docker compose up -d --build
 ```
 
-### 4）验证服务
+启动后可验证：
 
 ```bash
 curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "central ok"
 ```
 
-如果服务器开了防火墙，请放行 `8000/tcp`。
+浏览器访问：
 
-### 5）访问页面
+- `http://<你的服务器IP>:8000/`
 
-浏览器打开：
-
-`http://你的服务器IP:8000/`
-
-然后按页面提示：填写节点 ID、月流量、重置日，点击**一键生成安装命令**即可。
+如果开启防火墙，请放行 `8000/tcp`。
 
 ---
 
-## 安装方式 B：仅下载 compose 一键启动（前提：你已发布镜像）
+## 节点安装（Agent）
 
-只有在你把镜像发布到仓库（例如 GHCR / Docker Hub）并把 `docker-compose.yml` 中 `image:` 改成真实地址后，这种方式才可用。
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/<your-org>/<your-repo>/main/docker-compose.yml -o docker-compose.yml \
-  && docker compose -f docker-compose.yml pull \
-  && docker compose -f docker-compose.yml up -d
-```
-
----
-
-## Agent 一键安装（目标 VPS 执行）
-
-示例（以网页生成结果为准）：
+在中心端页面填写节点信息后，可获得一键安装命令。示例：
 
 ```bash
 curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/install.sh' | sudo bash -s -- install
 ```
 
-可选卸载：
+卸载示例：
 
 ```bash
 curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/uninstall.sh' | sudo bash -s -- uninstall
@@ -83,11 +71,11 @@ curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/unin
 
 ---
 
-## API 方式（可选）
+## API 使用（可选）
 
-如果你不走网页，也可以调这个接口：
+可通过 `POST /api/v1/quick-setup` 创建节点配置并获取安装命令。
 
-`POST /api/v1/quick-setup`
+请求示例：
 
 ```json
 {
@@ -97,14 +85,22 @@ curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/unin
 }
 ```
 
-返回包含：
-
-- `config`：完整节点配置
-- `install_command`：可直接执行的一键安装命令
+返回内容包含：
+- `config`：节点完整配置
+- `install_command`：一键安装命令
 
 ---
 
-## Agent（手动运行模式）
+## 本地开发运行
+
+### 1) 启动中心端（非 Docker）
+
+```bash
+pip install fastapi uvicorn
+uvicorn central.server:app --host 0.0.0.0 --port 8000
+```
+
+### 2) 手动运行 Agent
 
 ```bash
 python3 agent/traffic_agent.py \
@@ -112,14 +108,36 @@ python3 agent/traffic_agent.py \
   --api-key demo-key \
   --hmac-secret demo-secret \
   --node-id demo-node \
-  --iface eth0
+  --iface eth0 \
+  --interval 120
 ```
 
-周期上报：加上 `--interval 120`。
+---
 
-## 中心端（非 Docker）
+## 目录结构
 
-```bash
-pip install fastapi uvicorn
-uvicorn central.server:app --host 0.0.0.0 --port 8000
+```text
+.
+├── agent/
+│   └── traffic_agent.py
+├── central/
+│   └── server.py
+├── docker-compose.yml
+├── Dockerfile
+└── README.md
 ```
+
+---
+
+## 常见问题
+
+### 1) 为什么不能只下载 `docker-compose.yml` 直接启动？
+
+因为当前 compose 配置使用 `build: .`，需要本地存在 `Dockerfile` 和项目源码作为构建上下文。
+
+### 2) 生产环境建议
+
+- 使用 HTTPS 暴露中心端
+- 将 API Key / HMAC Secret 设置为高强度随机值
+- 配置反向代理与基础访问控制
+
