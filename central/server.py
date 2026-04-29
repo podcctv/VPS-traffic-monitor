@@ -16,6 +16,7 @@ import os
 import secrets
 import shlex
 import time
+from pathlib import Path
 from urllib.parse import quote
 from dataclasses import dataclass, asdict
 from typing import Dict
@@ -25,6 +26,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
 app = FastAPI(title="VPS Traffic Monitor Central API", version="0.3.0")
+BASE_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = BASE_DIR / "scripts"
 
 
 @dataclass
@@ -350,7 +353,8 @@ def quick_setup(payload: QuickSetupRequest, request: Request, session: str | Non
     public_base = str(payload.public_base_url).rstrip("/") if payload.public_base_url else _script_base_url(request)
     ingest_endpoint = str(payload.agent_endpoint) if payload.agent_endpoint else f"{base}/api/v1/ingest"
     node_id = payload.node_id.strip()
-    api_key = f"node-{node_id}-{secrets.token_hex(4)}"
+    node_id_token = "".join(ch if ch.isalnum() else "-" for ch in node_id).strip("-").lower() or "node"
+    api_key = f"node-{node_id_token}-{secrets.token_hex(4)}"
     hmac_secret = secrets.token_hex(16)
     login_token = secrets.token_hex(12)
 
@@ -381,7 +385,10 @@ def quick_setup(payload: QuickSetupRequest, request: Request, session: str | Non
 def raw_agent_bootstrap(api_key: str):
     if api_key not in NODE_SECRETS:
         raise HTTPException(status_code=404, detail="script not found")
-    script = open("scripts/agent-bootstrap.sh", "r", encoding="utf-8").read()
+    script_path = SCRIPTS_DIR / "agent-bootstrap.sh"
+    if not script_path.exists():
+        raise HTTPException(status_code=500, detail="bootstrap script missing")
+    script = script_path.read_text(encoding="utf-8")
     return Response(content=script, media_type="text/x-shellscript")
 
 
