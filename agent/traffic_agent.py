@@ -115,6 +115,18 @@ def get_node_config(config_url: str, timeout: int = 10) -> dict:
         return json.loads(resp.read().decode())
 
 
+def get_next_action(action_url: str, api_key: str, timeout: int = 10) -> dict:
+    req = request.Request(url=f"{action_url}?api_key={api_key}", method="GET")
+    with request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def execute_action(action: str) -> None:
+    if action != "uninstall":
+        return
+    subprocess.run(["bash", "/usr/local/bin/vtm-agent", "uninstall"], check=True)
+
+
 def run_one_click_from_config(config: dict, action: str) -> None:
     field = "install_script_url" if action == "install" else "uninstall_script_url"
     script_url = config.get(field)
@@ -146,6 +158,11 @@ def main() -> int:
         default="{base}/api/v1/nodes/{node_id}/config",
         help="template used to build config endpoint for --one-click",
     )
+    parser.add_argument(
+        "--action-endpoint-template",
+        default="{base}/api/v1/nodes/{node_id}/actions/next",
+        help="template used to query central for remote actions",
+    )
     args = parser.parse_args()
 
     if args.one_click:
@@ -162,6 +179,13 @@ def main() -> int:
         payload = build_payload(args.node_id, iface_data, args.version)
         status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
         print(f"[{iso_now()}] upload status={status} body={body}")
+        endpoint_base = args.endpoint.rsplit("/api/v1/ingest", 1)[0]
+        action_url = args.action_endpoint_template.format(base=endpoint_base, node_id=args.node_id)
+        action_resp = get_next_action(action_url, args.api_key)
+        if action_resp.get("action"):
+            execute_action(action_resp["action"])
+            print(f"[{iso_now()}] remote action executed: {action_resp['action']}")
+            break
         if args.interval <= 0:
             break
         time.sleep(args.interval)
