@@ -12,15 +12,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from dataclasses import dataclass, asdict
 from typing import Dict
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
-app = FastAPI(title="VPS Traffic Monitor Central API", version="0.2.0")
+app = FastAPI(title="VPS Traffic Monitor Central API", version="0.3.0")
 
 
 @dataclass
@@ -38,11 +39,8 @@ class NodeConfig:
     agent_interval: int = 120
 
 
-# demo in-memory stores (MVP)
 NODE_CONFIGS: Dict[str, NodeConfig] = {}
-NODE_SECRETS: Dict[str, dict] = {
-    "demo-key": {"hmac_secret": "demo-secret", "node_id": "demo-node"}
-}
+NODE_SECRETS: Dict[str, dict] = {"demo-key": {"hmac_secret": "demo-secret", "node_id": "demo-node"}}
 INGEST_CACHE = set()
 
 
@@ -66,6 +64,12 @@ class ConfigUpdate(BaseModel):
         if value.scheme != "https":
             raise ValueError("url must use https")
         return value
+
+
+class QuickSetupRequest(BaseModel):
+    node_id: str = Field(..., min_length=1)
+    monthly_quota_gb: conint(ge=1, le=1024 * 1024)
+    reset_day: conint(ge=1, le=31)
 
 
 class IngestPayload(BaseModel):
@@ -176,6 +180,10 @@ echo "uninstall done"
 """
 
 
+def _external_base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
 @app.get("/", response_class=HTMLResponse)
 def home_page():
     return """<!doctype html>
@@ -186,7 +194,8 @@ def home_page():
   <title>VPS 流量监控</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; margin: 2rem; background: #f8fafc; color: #0f172a; }
-    .card { max-width: 840px; background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .card { max-width: 900px; background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
     input, button { padding: .55rem .7rem; font-size: 15px; }
     button { cursor: pointer; border: 0; background: #2563eb; color: #fff; border-radius: 8px; }
     code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 4px; }
@@ -196,33 +205,81 @@ def home_page():
 <body>
   <div class="card">
     <h1>VPS 流量监控中心</h1>
-    <p>输入节点 ID 后可直接查询配置接口，便于快速检查部署状态。</p>
-    <p>API 文档：<a href="/docs" target="_blank">/docs</a></p>
+    <p><b>极简模式：</b>只填 节点ID / 月流量(GB) / 重置日，自动生成一键安装命令。</p>
 
-    <label for="nodeId">节点 ID：</label>
-    <input id="nodeId" value="demo-node" />
-    <button onclick="loadConfig()">查询配置</button>
+    <div class="row">
+      <div>
+        <label>节点 ID</label><br><input id="nodeId" value="demo-node"/>
+      </div>
+      <div>
+        <label>月流量配额(GB)</label><br><input id="quota" value="1024" type="number" min="1"/>
+      </div>
+    </div>
+    <div style="margin-top:.8rem">
+      <label>每月重置日期(1-31)</label><br><input id="resetDay" value="1" type="number" min="1" max="31"/>
+    </div>
 
-    <p style="margin-top:1rem">接口：<code id="url">/api/v1/nodes/demo-node/config</code></p>
-    <pre id="output">点击“查询配置”后显示结果...</pre>
+    <p style="margin-top:1rem">
+      <button onclick="quickSetup()">一键生成安装命令</button>
+      <a href="/docs" target="_blank" style="margin-left:1rem">查看 API 文档</a>
+    </p>
+
+    <p>安装命令（复制到目标 VPS 执行）：</p>
+    <pre id="installCmd">点击“生成安装命令”后显示...</pre>
+
+    <p>当前配置：</p>
+    <pre id="output">-</pre>
   </div>
 
   <script>
-    async function loadConfig(){
-      const nodeId = document.getElementById('nodeId').value.trim() || 'demo-node';
-      const url = `/api/v1/nodes/${encodeURIComponent(nodeId)}/config`;
-      document.getElementById('url').textContent = url;
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
+    async function quickSetup(){
+      const payload = {
+        node_id: document.getElementById('nodeId').value.trim(),
+        monthly_quota_gb: Number(document.getElementById('quota').value || 0),
+        reset_day: Number(document.getElementById('resetDay').value || 0)
+      };
+      const res = await fetch('/api/v1/quick-setup', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if(!res.ok){
         document.getElementById('output').textContent = JSON.stringify(data, null, 2);
-      } catch (e) {
-        document.getElementById('output').textContent = `请求失败: ${e}`;
+        return;
       }
+      document.getElementById('output').textContent = JSON.stringify(data.config, null, 2);
+      document.getElementById('installCmd').textContent = data.install_command;
     }
   </script>
 </body>
 </html>"""
+
+
+@app.post("/api/v1/quick-setup")
+def quick_setup(payload: QuickSetupRequest, request: Request):
+    base = _external_base_url(request)
+    node_id = payload.node_id.strip()
+    api_key = f"node-{node_id}-{secrets.token_hex(4)}"
+    hmac_secret = secrets.token_hex(16)
+
+    cfg = NodeConfig(
+        node_id=node_id,
+        monthly_quota_gb=payload.monthly_quota_gb,
+        reset_day=payload.reset_day,
+        login_verify_enabled=True,
+        install_script_url=f"{base}/agent/traffic_agent.py",
+        uninstall_script_url=f"{base}/api/v1/nodes/{node_id}/scripts/uninstall.sh",
+        agent_endpoint=f"{base}/api/v1/ingest",
+        agent_api_key=api_key,
+        agent_hmac_secret=hmac_secret,
+    )
+    NODE_CONFIGS[node_id] = cfg
+    NODE_SECRETS[api_key] = {"hmac_secret": hmac_secret, "node_id": node_id}
+
+    install_cmd = f"curl -fsSL '{base}/api/v1/nodes/{node_id}/scripts/install.sh' | sudo bash -s -- install"
+    return {"ok": True, "config": asdict(cfg), "install_command": install_cmd}
+
 
 @app.get("/api/v1/nodes/{node_id}/config")
 def get_node_config(node_id: str):
