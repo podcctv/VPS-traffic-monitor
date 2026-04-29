@@ -1,3 +1,8 @@
+# 一键拉取并启动（在服务器执行）
+# curl -fsSL https://raw.githubusercontent.com/<your-org>/<your-repo>/main/docker-compose.yml -o docker-compose.yml \
+#   && docker compose pull \
+#   && docker compose up -d
+
 services:
   central:
     build: .
@@ -5,3 +10,14 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+
+x-one-click-pull-script: |
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  COMPOSE_URL="${COMPOSE_URL:-https://raw.githubusercontent.com/<your-org>/<your-repo>/main/docker-compose.yml}"
+  TARGET_FILE="${TARGET_FILE:-docker-compose.yml}"
+
+  curl -fsSL "$COMPOSE_URL" -o "$TARGET_FILE"
+  docker compose -f "$TARGET_FILE" pull
+  docker compose -f "$TARGET_FILE" up -d
