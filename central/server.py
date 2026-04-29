@@ -12,12 +12,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 from dataclasses import dataclass, asdict
 from typing import Dict
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import Cookie, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
@@ -44,6 +45,8 @@ NODE_CONFIGS: Dict[str, NodeConfig] = {}
 NODE_SECRETS: Dict[str, dict] = {"demo-key": {"hmac_secret": "demo-secret", "node_id": "demo-node"}}
 INGEST_CACHE = set()
 LATEST_INGEST: Dict[str, dict] = {}
+ADMIN_STATE = {"username": None, "password_hash": None}
+ADMIN_SESSIONS = set()
 
 
 class ConfigUpdate(BaseModel):
@@ -89,6 +92,11 @@ class IngestPayload(BaseModel):
 
 class LoginVerifyRequest(BaseModel):
     token: str = Field(..., min_length=1)
+
+
+class AdminCreds(BaseModel):
+    username: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=6)
 
 
 def verify_sig(secret: str, timestamp: str, nonce: str, body: bytes, signature: str) -> bool:
@@ -260,6 +268,21 @@ def _external_base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _require_admin(session: str | None):
+    if not ADMIN_STATE["password_hash"]:
+        raise HTTPException(status_code=403, detail="admin not initialized")
+    if not session or session not in ADMIN_SESSIONS:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def _script_base_url(request: Request) -> str:
+    return os.getenv("SCRIPT_BASE_URL", _external_base_url(request))
+
+
 @app.get("/", response_class=HTMLResponse)
 def home_page():
     return """<!doctype html>
@@ -281,7 +304,8 @@ def home_page():
 <body>
   <div class="card">
     <h1>VPS 流量监控中心</h1>
-    <p><b>极简模式：</b>只填 节点ID / 月流量(GB) / 重置日，自动生成一键安装命令。</p>
+    <p><b>极简模式：</b>首次登录需要设置账号密码，登录后才可配置与查看。</p>
+    <div id="authBox" style="margin:.8rem 0;padding:.8rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc">检测登录状态中...</div>
 
     <div class="row">
       <div>
@@ -314,6 +338,31 @@ def home_page():
   </div>
 
   <script>
+    async function renderAuth(){
+      const res = await fetch('/api/v1/admin/status');
+      const data = await res.json();
+      const el = document.getElementById('authBox');
+      if(!data.initialized){
+        el.innerHTML = `<b>首次初始化管理员</b><br><input id="adminUser" placeholder="用户名"/><input id="adminPass" type="password" placeholder="密码"/><button onclick="initAdmin()">初始化</button>`;
+      } else if(!data.logged_in){
+        el.innerHTML = `<b>请登录</b><br><input id="adminUser" placeholder="用户名"/><input id="adminPass" type="password" placeholder="密码"/><button onclick="loginAdmin()">登录</button>`;
+      } else {
+        el.innerHTML = `已登录：<code>${data.username}</code>`;
+      }
+    }
+    async function initAdmin(){
+      const payload = {username: document.getElementById('adminUser').value, password: document.getElementById('adminPass').value};
+      const res = await fetch('/api/v1/admin/init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if(!res.ok){ alert('初始化失败'); return; }
+      renderAuth();
+    }
+    async function loginAdmin(){
+      const payload = {username: document.getElementById('adminUser').value, password: document.getElementById('adminPass').value};
+      const res = await fetch('/api/v1/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if(!res.ok){ alert('登录失败'); return; }
+      renderAuth();
+      loadDashboard();
+    }
     async function quickSetup(){
       const payload = {
         node_id: document.getElementById('nodeId').value.trim(),
@@ -346,14 +395,45 @@ def home_page():
       document.getElementById('dashboard').textContent = JSON.stringify(data, null, 2);
     }
 
+    renderAuth();
     loadDashboard();
   </script>
 </body>
 </html>"""
 
 
+@app.get("/api/v1/admin/status")
+def admin_status(session: str | None = Cookie(default=None)):
+    return {"initialized": bool(ADMIN_STATE["password_hash"]), "logged_in": bool(session in ADMIN_SESSIONS), "username": ADMIN_STATE["username"]}
+
+
+@app.post("/api/v1/admin/init")
+def admin_init(payload: AdminCreds):
+    if ADMIN_STATE["password_hash"]:
+        raise HTTPException(status_code=409, detail="already initialized")
+    ADMIN_STATE["username"] = payload.username
+    ADMIN_STATE["password_hash"] = _hash_password(payload.password)
+    token = secrets.token_hex(24)
+    ADMIN_SESSIONS.add(token)
+    resp = Response(content=json.dumps({"ok": True}), media_type="application/json")
+    resp.set_cookie("session", token, httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/api/v1/admin/login")
+def admin_login(payload: AdminCreds):
+    if payload.username != ADMIN_STATE["username"] or _hash_password(payload.password) != ADMIN_STATE["password_hash"]:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    token = secrets.token_hex(24)
+    ADMIN_SESSIONS.add(token)
+    resp = Response(content=json.dumps({"ok": True}), media_type="application/json")
+    resp.set_cookie("session", token, httponly=True, samesite="lax")
+    return resp
+
+
 @app.post("/api/v1/quick-setup")
-def quick_setup(payload: QuickSetupRequest, request: Request):
+def quick_setup(payload: QuickSetupRequest, request: Request, session: str | None = Cookie(default=None)):
+    _require_admin(session)
     base = _external_base_url(request)
     node_id = payload.node_id.strip()
     api_key = f"node-{node_id}-{secrets.token_hex(4)}"
@@ -375,8 +455,20 @@ def quick_setup(payload: QuickSetupRequest, request: Request):
     NODE_CONFIGS[node_id] = cfg
     NODE_SECRETS[api_key] = {"hmac_secret": hmac_secret, "node_id": node_id}
 
-    install_cmd = f"curl -fsSL '{base}/api/v1/nodes/{node_id}/scripts/install.sh' | sudo bash -s -- install"
+    script_base = _script_base_url(request)
+    install_cmd = (
+        f"curl -fsSL '{script_base}/raw/{cfg.agent_api_key}/agent-bootstrap.sh' "
+        f"| sudo NODE_ID={node_id} ENDPOINT={cfg.agent_endpoint} API_KEY={cfg.agent_api_key} HMAC_SECRET={cfg.agent_hmac_secret} bash -s -- install"
+    )
     return {"ok": True, "config": asdict(cfg), "install_command": install_cmd}
+
+
+@app.get("/raw/{api_key}/agent-bootstrap.sh")
+def raw_agent_bootstrap(api_key: str):
+    if api_key not in NODE_SECRETS:
+        raise HTTPException(status_code=404, detail="script not found")
+    script = open("scripts/agent-bootstrap.sh", "r", encoding="utf-8").read()
+    return Response(content=script, media_type="text/x-shellscript")
 
 
 @app.get("/api/v1/nodes/{node_id}/config")
@@ -420,7 +512,8 @@ def get_central_upgrade_script():
 
 
 @app.get("/api/v1/dashboard")
-def dashboard():
+def dashboard(session: str | None = Cookie(default=None)):
+    _require_admin(session)
     return {"nodes": [asdict(cfg) for cfg in NODE_CONFIGS.values()], "latest_ingest": LATEST_INGEST}
 
 
