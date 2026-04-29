@@ -11,6 +11,7 @@
 - 节点配置管理（节点 ID、月流量配额、重置日）
 - 自动生成节点安装/卸载脚本命令
 - 流量数据上报接口（支持 API Key + HMAC）
+- 登录校验接口（可按节点开关 + token 校验）
 - Web 页面查看节点状态与用量
 - Docker Compose 一键启动中心端
 
@@ -89,6 +90,10 @@ curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/unin
 - `config`：节点完整配置
 - `install_command`：一键安装命令
 
+新增接口：
+- `POST /api/v1/nodes/{node_id}/login-verify`：登录验证
+- `GET /api/v1/dashboard`：中心端展示数据（节点配置 + 最新上报）
+
 ---
 
 ## 本地开发运行
@@ -140,4 +145,3 @@ python3 agent/traffic_agent.py \
 - 使用 HTTPS 暴露中心端
 - 将 API Key / HMAC Secret 设置为高强度随机值
 - 配置反向代理与基础访问控制
-

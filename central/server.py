@@ -30,6 +30,7 @@ class NodeConfig:
     monthly_quota_gb: int = 1024
     reset_day: int = 1
     login_verify_enabled: bool = True
+    login_verify_token: str = "demo-login-token"
     install_script_url: str | None = None
     uninstall_script_url: str | None = None
     agent_endpoint: str = "https://central.example.com/api/v1/ingest"
@@ -42,12 +43,14 @@ class NodeConfig:
 NODE_CONFIGS: Dict[str, NodeConfig] = {}
 NODE_SECRETS: Dict[str, dict] = {"demo-key": {"hmac_secret": "demo-secret", "node_id": "demo-node"}}
 INGEST_CACHE = set()
+LATEST_INGEST: Dict[str, dict] = {}
 
 
 class ConfigUpdate(BaseModel):
     monthly_quota_gb: conint(ge=1, le=1024 * 1024) = Field(..., description="Monthly traffic quota in GB")
     reset_day: conint(ge=1, le=31)
     login_verify_enabled: bool
+    login_verify_token: str = Field(..., min_length=6)
     install_script_url: HttpUrl | None = None
     uninstall_script_url: HttpUrl | None = None
     agent_endpoint: HttpUrl
@@ -82,6 +85,10 @@ class IngestPayload(BaseModel):
     daily: list
     hostname: str | None = None
     agent_version: str | None = None
+
+
+class LoginVerifyRequest(BaseModel):
+    token: str = Field(..., min_length=1)
 
 
 def verify_sig(secret: str, timestamp: str, nonce: str, body: bytes, signature: str) -> bool:
@@ -229,6 +236,8 @@ def home_page():
 
     <p>当前配置：</p>
     <pre id="output">-</pre>
+    <p style="margin-top:1rem"><button onclick="loadDashboard()">刷新节点展示</button></p>
+    <pre id="dashboard">暂无上报数据</pre>
   </div>
 
   <script>
@@ -250,7 +259,16 @@ def home_page():
       }
       document.getElementById('output').textContent = JSON.stringify(data.config, null, 2);
       document.getElementById('installCmd').textContent = data.install_command;
+      loadDashboard();
     }
+
+    async function loadDashboard(){
+      const res = await fetch('/api/v1/dashboard');
+      const data = await res.json();
+      document.getElementById('dashboard').textContent = JSON.stringify(data, null, 2);
+    }
+
+    loadDashboard();
   </script>
 </body>
 </html>"""
@@ -262,12 +280,14 @@ def quick_setup(payload: QuickSetupRequest, request: Request):
     node_id = payload.node_id.strip()
     api_key = f"node-{node_id}-{secrets.token_hex(4)}"
     hmac_secret = secrets.token_hex(16)
+    login_token = secrets.token_hex(12)
 
     cfg = NodeConfig(
         node_id=node_id,
         monthly_quota_gb=payload.monthly_quota_gb,
         reset_day=payload.reset_day,
         login_verify_enabled=True,
+        login_verify_token=login_token,
         install_script_url=f"{base}/agent/traffic_agent.py",
         uninstall_script_url=f"{base}/api/v1/nodes/{node_id}/scripts/uninstall.sh",
         agent_endpoint=f"{base}/api/v1/ingest",
@@ -303,6 +323,23 @@ def get_node_script(node_id: str, action: str):
     return Response(content=script, media_type="text/x-shellscript")
 
 
+@app.post("/api/v1/nodes/{node_id}/login-verify")
+def verify_node_login(node_id: str, payload: LoginVerifyRequest):
+    cfg = NODE_CONFIGS.get(node_id) or NodeConfig(node_id=node_id)
+    NODE_CONFIGS[node_id] = cfg
+    if not cfg.login_verify_enabled:
+        return {"ok": True, "verify_enabled": False, "verified": True, "reason": "verification disabled"}
+    verified = secrets.compare_digest(payload.token, cfg.login_verify_token)
+    if not verified:
+        raise HTTPException(status_code=401, detail="invalid login token")
+    return {"ok": True, "verify_enabled": True, "verified": True}
+
+
+@app.get("/api/v1/dashboard")
+def dashboard():
+    return {"nodes": [asdict(cfg) for cfg in NODE_CONFIGS.values()], "latest_ingest": LATEST_INGEST}
+
+
 @app.post("/api/v1/ingest")
 def ingest(
     payload: IngestPayload,
@@ -332,4 +369,11 @@ def ingest(
         raise HTTPException(status_code=401, detail="bad signature")
 
     INGEST_CACHE.add(dedupe_key)
+    LATEST_INGEST[payload.node_id] = {
+        "timestamp": payload.timestamp,
+        "iface": payload.iface,
+        "counters": payload.counters,
+        "hostname": payload.hostname,
+        "agent_version": payload.agent_version,
+    }
     return {"ok": True, "stored": True}
