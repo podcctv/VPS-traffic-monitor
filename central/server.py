@@ -427,7 +427,7 @@ def quick_setup(payload: QuickSetupRequest, request: Request, session: str | Non
         reset_day=payload.reset_day,
         login_verify_enabled=True,
         login_verify_token=login_token,
-        install_script_url=f"{public_base}/agent/traffic_agent.py",
+        install_script_url=f"{base}/api/v1/nodes/{node_id}/scripts/install.sh",
         uninstall_script_url=f"{base}/api/v1/nodes/{node_id}/scripts/uninstall.sh",
         agent_endpoint=ingest_endpoint,
         agent_api_key=api_key,
@@ -467,8 +467,11 @@ def get_node_config(node_id: str):
 def update_node_config(node_id: str, update: ConfigUpdate):
     if node_id not in NODE_CONFIGS:
         raise HTTPException(status_code=404, detail="node not found")
+    old_key = NODE_CONFIGS[node_id].agent_api_key
     cfg = NodeConfig(node_id=node_id, **update.model_dump())
     NODE_CONFIGS[node_id] = cfg
+    if old_key != cfg.agent_api_key:
+        NODE_SECRETS.pop(old_key, None)
     NODE_SECRETS[cfg.agent_api_key] = {"hmac_secret": cfg.agent_hmac_secret, "node_id": node_id}
     return {"ok": True, "config": asdict(cfg)}
 
@@ -506,9 +509,10 @@ def verify_node_login(node_id: str, payload: LoginVerifyRequest):
 @app.post("/api/v1/nodes/{node_id}/actions/uninstall")
 def queue_uninstall_action(node_id: str, session: str | None = Cookie(default=None)):
     _require_admin(session)
-    if not delete_node(node_id):
+    if node_id not in NODE_CONFIGS:
         raise HTTPException(status_code=404, detail="node not found")
-    return {"ok": True, "node_id": node_id, "action": "uninstall", "deleted": True}
+    NODE_PENDING_ACTIONS[node_id] = "uninstall"
+    return {"ok": True, "node_id": node_id, "action": "uninstall", "queued": True}
 
 
 @app.get("/api/v1/nodes/{node_id}/actions/next")
