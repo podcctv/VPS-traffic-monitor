@@ -63,6 +63,14 @@ def pick_interfaces(data: dict, iface: str | None) -> list[dict]:
     return selected
 
 
+def _vnstat_to_bytes(value: int | float | str | None) -> int:
+    """vnStat JSON values are in KiB; normalize to bytes."""
+    try:
+        return int(float(value or 0) * 1024)
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_payload(node_id: str, iface_data: dict, version: str) -> dict:
     traffic = iface_data.get("traffic", {})
     total = traffic.get("total", {})
@@ -76,14 +84,14 @@ def build_payload(node_id: str, iface_data: dict, version: str) -> dict:
     hourly = []
     for h in hours[-24:]:
         ts = datetime(h["date"]["year"], h["date"]["month"], h["date"]["day"], h.get("time", {}).get("hour", 0), tzinfo=timezone.utc)
-        hourly.append({"time": ts.isoformat().replace("+00:00", "Z"), "rx": int(h.get("rx", 0)), "tx": int(h.get("tx", 0))})
+        hourly.append({"time": ts.isoformat().replace("+00:00", "Z"), "rx": _vnstat_to_bytes(h.get("rx", 0)), "tx": _vnstat_to_bytes(h.get("tx", 0))})
 
     daily = []
     for d in days[-30:]:
         daily.append({
             "date": f"{d['date']['year']:04d}-{d['date']['month']:02d}-{d['date']['day']:02d}",
-            "rx": int(d.get("rx", 0)),
-            "tx": int(d.get("tx", 0)),
+            "rx": _vnstat_to_bytes(d.get("rx", 0)),
+            "tx": _vnstat_to_bytes(d.get("tx", 0)),
         })
 
     return {
@@ -92,12 +100,12 @@ def build_payload(node_id: str, iface_data: dict, version: str) -> dict:
         "timestamp": iso_now(),
         "iface": iface_data.get("name", "unknown"),
         "counters": {
-            "rx_total_bytes": int(total.get("rx", 0)),
-            "tx_total_bytes": int(total.get("tx", 0)),
-            "rx_today_bytes": int(today.get("rx", 0)),
-            "tx_today_bytes": int(today.get("tx", 0)),
-            "rx_month_bytes": int(month.get("rx", 0)),
-            "tx_month_bytes": int(month.get("tx", 0)),
+            "rx_total_bytes": _vnstat_to_bytes(total.get("rx", 0)),
+            "tx_total_bytes": _vnstat_to_bytes(total.get("tx", 0)),
+            "rx_today_bytes": _vnstat_to_bytes(today.get("rx", 0)),
+            "tx_today_bytes": _vnstat_to_bytes(today.get("tx", 0)),
+            "rx_month_bytes": _vnstat_to_bytes(month.get("rx", 0)),
+            "tx_month_bytes": _vnstat_to_bytes(month.get("tx", 0)),
         },
         "hourly": hourly,
         "daily": daily,
