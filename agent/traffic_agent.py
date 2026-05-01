@@ -59,7 +59,8 @@ def pick_interfaces(data: dict, iface: str | None) -> list[dict]:
         return [interfaces[0]]
     selected = [item for item in interfaces if item.get("name") in wanted]
     if not selected:
-        raise RuntimeError(f"interfaces not found: {iface}")
+        available = ",".join(str(item.get("name", "")) for item in interfaces if item.get("name"))
+        raise ValueError(f"interfaces not found: {iface}; available={available}")
     return selected
 
 
@@ -236,7 +237,7 @@ def main() -> int:
             payload = merge_payloads(args.node_id, iface_payloads, args.version)
             status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
             print(f"[{iso_now()}] upload status={status} body={body}")
-        except (subprocess.SubprocessError, json.JSONDecodeError, HTTPError, URLError, OSError, ValueError) as exc:
+        except (subprocess.SubprocessError, json.JSONDecodeError, HTTPError, URLError, OSError, ValueError, RuntimeError) as exc:
             print(f"[{iso_now()}] upload failed: {exc}")
             if args.interval <= 0:
                 return 1
