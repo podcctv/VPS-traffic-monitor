@@ -5,7 +5,8 @@
 services:
   central:
     image: ghcr.io/podcctv/vps-traffic-monitor:latest
-    # build: .
+    build: .
+    pull_policy: build
     container_name: vps-traffic-central
     ports:
       - "8000:8000"
@@ -15,9 +16,9 @@ x-one-click-pull-script: |
   #!/usr/bin/env bash
   set -euo pipefail
 
-  COMPOSE_URL="${COMPOSE_URL:-https://raw.githubusercontent.com/podcctv/VPS-traffic-monitor/main/docker-compose.yml}"
-  TARGET_FILE="${TARGET_FILE:-docker-compose.yml}"
+  COMPOSE_URL="$${COMPOSE_URL:-https://raw.githubusercontent.com/podcctv/VPS-traffic-monitor/main/docker-compose.yml}"
+  TARGET_FILE="$${TARGET_FILE:-docker-compose.yml}"
 
-  curl -fsSL "$COMPOSE_URL" -o "$TARGET_FILE"
-  docker compose -f "$TARGET_FILE" pull
-  docker compose -f "$TARGET_FILE" up -d
+  curl -fsSL "$${COMPOSE_URL}" -o "$${TARGET_FILE}"
+  docker compose -f "$${TARGET_FILE}" pull
+  docker compose -f "$${TARGET_FILE}" up -d
