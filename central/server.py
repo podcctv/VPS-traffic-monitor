@@ -455,6 +455,16 @@ def raw_agent_bootstrap(api_key: str):
     return Response(content=script, media_type="text/x-shellscript")
 
 
+@app.get("/raw/{api_key}/traffic_agent.py")
+def raw_agent_python(api_key: str):
+    if api_key not in NODE_SECRETS:
+        raise HTTPException(status_code=404, detail="script not found")
+    script_path = BASE_DIR / "agent" / "traffic_agent.py"
+    if not script_path.exists():
+        raise HTTPException(status_code=404, detail="agent script missing")
+    return Response(content=script_path.read_text(encoding="utf-8"), media_type="text/x-python")
+
+
 @app.get("/api/v1/nodes/{node_id}/config")
 def get_node_config(node_id: str):
     cfg = NODE_CONFIGS.get(node_id)
