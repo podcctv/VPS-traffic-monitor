@@ -84,13 +84,25 @@ def build_payload(node_id: str, iface_data: dict, version: str) -> dict:
 
     hourly = []
     for h in hours[-24:]:
-        ts = datetime(h["date"]["year"], h["date"]["month"], h["date"]["day"], h.get("time", {}).get("hour", 0), tzinfo=timezone.utc)
+        date_info = h.get("date", {})
+        year = date_info.get("year")
+        month_no = date_info.get("month")
+        day_no = date_info.get("day")
+        if not (year and month_no and day_no):
+            continue
+        ts = datetime(int(year), int(month_no), int(day_no), int(h.get("time", {}).get("hour", 0) or 0), tzinfo=timezone.utc)
         hourly.append({"time": ts.isoformat().replace("+00:00", "Z"), "rx": _vnstat_to_bytes(h.get("rx", 0)), "tx": _vnstat_to_bytes(h.get("tx", 0))})
 
     daily = []
     for d in days[-30:]:
+        date_info = d.get("date", {})
+        year = date_info.get("year")
+        month_no = date_info.get("month")
+        day_no = date_info.get("day")
+        if not (year and month_no and day_no):
+            continue
         daily.append({
-            "date": f"{d['date']['year']:04d}-{d['date']['month']:02d}-{d['date']['day']:02d}",
+            "date": f"{int(year):04d}-{int(month_no):02d}-{int(day_no):02d}",
             "rx": _vnstat_to_bytes(d.get("rx", 0)),
             "tx": _vnstat_to_bytes(d.get("tx", 0)),
         })
@@ -237,7 +249,7 @@ def main() -> int:
             payload = merge_payloads(args.node_id, iface_payloads, args.version)
             status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
             print(f"[{iso_now()}] upload status={status} body={body}")
-        except (subprocess.SubprocessError, json.JSONDecodeError, HTTPError, URLError, OSError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             print(f"[{iso_now()}] upload failed: {exc}")
             if args.interval <= 0:
                 return 1
