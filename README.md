@@ -116,6 +116,9 @@ chmod +x /usr/local/bin/vtm-central
 ```bash
 curl -fsSL 'https://your-central.example.com/raw/<api-key>/agent-bootstrap.sh' \
   | sudo NODE_ID='demo-node' ENDPOINT='https://your-central.example.com/api/v1/ingest' API_KEY='<api-key>' HMAC_SECRET='<hmac-secret>' bash -s -- install
+
+# 可选：指定单网卡（不传则安装时会交互选择，默认 all 监控全部网卡）
+# ... IFACE='eth0' bash -s -- install
 ```
 
 如果节点上已存在 Agent，再次执行 `install` 会先提示“检测到已安装 Agent”，然后覆盖安装（更新代码、配置和 systemd 单元）。
@@ -177,9 +180,14 @@ python3 agent/traffic_agent.py \
   --api-key demo-key \
   --hmac-secret demo-secret \
   --node-id demo-node \
-  --iface eth0 \
+  --iface all \
   --interval 120
 ```
+
+`--iface` 支持：
+- `all`：监控并汇总全部网卡（推荐）
+- 单个网卡名：如 `eth0`、`ens3`
+- 多网卡逗号分隔：如 `eth0,ens3`
 
 ---
 

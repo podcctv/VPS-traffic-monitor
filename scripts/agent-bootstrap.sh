@@ -17,6 +17,34 @@ Usage:
 USAGE
 }
 
+choose_iface() {
+  if [[ -n "${IFACE:-}" ]]; then
+    return
+  fi
+  if [[ ! -t 0 ]]; then
+    IFACE="all"
+    return
+  fi
+  echo "选择要监控的网卡（默认: all=全部网卡）:"
+  mapfile -t ifaces < <(ip -o link show | awk -F': ' '{print $2}' | awk -F'@' '{print $1}' | grep -E '^(eth|ens|enp|eno|bond|br|wg|tun)' || true)
+  if [[ "${#ifaces[@]}" -eq 0 ]]; then
+    read -r -p "未检测到常见网卡，输入网卡名(留空=all): " picked
+    IFACE="${picked:-all}"
+    return
+  fi
+  echo "0) all (全部)"
+  for i in "${!ifaces[@]}"; do
+    echo "$((i+1))) ${ifaces[$i]}"
+  done
+  read -r -p "请输入编号 [0]: " idx
+  idx="${idx:-0}"
+  if [[ "$idx" =~ ^[0-9]+$ ]] && (( idx >= 1 && idx <= ${#ifaces[@]} )); then
+    IFACE="${ifaces[$((idx-1))]}"
+  else
+    IFACE="all"
+  fi
+}
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing command: $1" >&2
@@ -54,7 +82,8 @@ write_config() {
   : "${ENDPOINT:?ENDPOINT is required}"
   : "${API_KEY:?API_KEY is required}"
   : "${HMAC_SECRET:?HMAC_SECRET is required}"
-  IFACE="${IFACE:-eth0}"
+  choose_iface
+  IFACE="${IFACE:-all}"
   INTERVAL="${INTERVAL:-120}"
 
   install -d /etc/vps-traffic-monitor
