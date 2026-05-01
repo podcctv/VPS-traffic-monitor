@@ -113,6 +113,18 @@ def verify_sig(secret: str, timestamp: str, nonce: str, body: bytes, signature: 
     return hmac.compare_digest(expected, signature)
 
 
+def delete_node(node_id: str) -> bool:
+    cfg = NODE_CONFIGS.pop(node_id, None)
+    if not cfg:
+        return False
+    NODE_PENDING_ACTIONS.pop(node_id, None)
+    LATEST_INGEST.pop(node_id, None)
+    INGEST_CACHE.difference_update({k for k in INGEST_CACHE if k.startswith(f"{node_id}|")})
+    api_key = cfg.agent_api_key
+    NODE_SECRETS.pop(api_key, None)
+    return True
+
+
 def build_one_click_script(cfg: NodeConfig, action: str) -> str:
     if action not in {"install", "uninstall"}:
         raise ValueError("action must be install/uninstall")
@@ -315,7 +327,7 @@ def admin_page():
 <div class="overflow-auto"><table class="w-full text-sm border"><thead class="bg-slate-100"><tr><th class="border p-2">节点</th><th class="border p-2">月配额</th><th class="border p-2">重置日</th><th class="border p-2">上报地址</th><th class="border p-2">当前累计</th><th class="border p-2">最后上报</th><th class="border p-2">远程操作</th></tr></thead><tbody><tr v-if="rows.length===0"><td colspan="7" class="border p-3 text-center text-slate-500">暂无节点配置</td></tr><tr v-for="row in rows" :key="row.node_id"><td class="border p-2">{{row.node_id}}</td><td class="border p-2">{{row.monthly_quota_gb}}</td><td class="border p-2">{{row.reset_day}}</td><td class="border p-2">{{row.agent_endpoint}}</td><td class="border p-2">{{row.used}}</td><td class="border p-2">{{row.timestamp}}</td><td class="border p-2"><button @click="requestUninstall(row.node_id)" class="bg-rose-600 text-white px-2 py-1 rounded">卸载客户端</button></td></tr></tbody></table></div></div>
 <div v-if="showAuth" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center"><div class="bg-white rounded-xl p-6 w-80 space-y-3"><h3 class="text-lg font-bold">{{ authTitle }}</h3><input v-model="admin.username" placeholder="用户名" class="w-full border rounded px-3 py-2"><input v-model="admin.password" type="password" placeholder="密码" class="w-full border rounded px-3 py-2"><button @click="submitAuth" class="w-full bg-blue-600 text-white py-2 rounded">{{ authAction }}</button></div></div></div>
 <script>
-const {createApp}=Vue;createApp({data(){return{authInitialized:false,loggedIn:false,authSummary:'检测中...',showAuth:true,authMode:'init',admin:{username:'',password:''},form:{node_id:'demo-node',monthly_quota_gb:1024,reset_day:1,public_base_url:'',agent_endpoint:''},installCmd:'点击“生成安装命令”后显示...',centralUpgradeCmd:'点击“生成中心端升级命令”后显示...',outputText:'-',rows:[]}},computed:{authTitle(){return this.authMode==='init'?'首次初始化管理员':'管理员登录'},authAction(){return this.authMode==='init'?'初始化':'登录'}},methods:{async renderAuth(){const res=await fetch('/api/v1/admin/status');const data=await res.json();this.authInitialized=data.initialized;this.loggedIn=data.logged_in;this.authMode=!data.initialized?'init':'login';this.showAuth=!(data.initialized&&data.logged_in);this.authSummary=!data.initialized?'未初始化管理员':(data.logged_in?`已登录：${data.username}`:'未登录');},async submitAuth(){const api=this.authMode==='init'?'/api/v1/admin/init':'/api/v1/admin/login';const res=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.admin)});if(!res.ok){alert(`${this.authAction}失败`);return;}await this.renderAuth();await this.loadDashboard();},async quickSetup(){const payload={...this.form,public_base_url:this.form.public_base_url.trim()||null,agent_endpoint:this.form.agent_endpoint.trim()||null};const res=await fetch('/api/v1/quick-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();this.outputText=JSON.stringify(res.ok?data.config:data,null,2);if(res.ok){this.installCmd=data.install_command;await this.loadDashboard();}},genCentralUpgrade(){this.centralUpgradeCmd=`curl -fsSL '${window.location.origin}/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade`;},async requestUninstall(nodeId){if(!confirm(`确认远程卸载节点 ${nodeId} 客户端？`)){return;}const res=await fetch(`/api/v1/nodes/${encodeURIComponent(nodeId)}/actions/uninstall`,{method:'POST'});if(!res.ok){alert('下发卸载指令失败');return;}alert('已下发卸载指令，等待节点下一次上报时执行。');},async loadDashboard(){const res=await fetch('/api/v1/dashboard');if(!res.ok){this.rows=[];return;}const data=await res.json();const latest=data.latest_ingest||{};this.rows=(data.nodes||[]).map(n=>{const li=latest[n.node_id]||{};return{...n,used:(li.counters&&li.counters.total_gib)?`${li.counters.total_gib} GiB`:'-',timestamp:li.timestamp||'-'}});}},async mounted(){await this.renderAuth();await this.loadDashboard();}}).mount('#app');
+const {createApp}=Vue;createApp({data(){return{authInitialized:false,loggedIn:false,authSummary:'检测中...',showAuth:true,authMode:'init',admin:{username:'',password:''},form:{node_id:'demo-node',monthly_quota_gb:1024,reset_day:1,public_base_url:'',agent_endpoint:''},installCmd:'点击“生成安装命令”后显示...',centralUpgradeCmd:'点击“生成中心端升级命令”后显示...',outputText:'-',rows:[]}},computed:{authTitle(){return this.authMode==='init'?'首次初始化管理员':'管理员登录'},authAction(){return this.authMode==='init'?'初始化':'登录'}},methods:{async renderAuth(){const res=await fetch('/api/v1/admin/status');const data=await res.json();this.authInitialized=data.initialized;this.loggedIn=data.logged_in;this.authMode=!data.initialized?'init':'login';this.showAuth=!(data.initialized&&data.logged_in);this.authSummary=!data.initialized?'未初始化管理员':(data.logged_in?`已登录：${data.username}`:'未登录');},async submitAuth(){const api=this.authMode==='init'?'/api/v1/admin/init':'/api/v1/admin/login';const res=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.admin)});if(!res.ok){alert(`${this.authAction}失败`);return;}await this.renderAuth();await this.loadDashboard();},async quickSetup(){const payload={...this.form,public_base_url:this.form.public_base_url.trim()||null,agent_endpoint:this.form.agent_endpoint.trim()||null};const res=await fetch('/api/v1/quick-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();this.outputText=JSON.stringify(res.ok?data.config:data,null,2);if(res.ok){this.installCmd=data.install_command;await this.loadDashboard();}},genCentralUpgrade(){this.centralUpgradeCmd=`curl -fsSL '${window.location.origin}/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade`;},async requestUninstall(nodeId){if(!confirm(`确认卸载并删除节点 ${nodeId} 记录？`)){return;}const res=await fetch(`/api/v1/nodes/${encodeURIComponent(nodeId)}/actions/uninstall`,{method:'POST'});if(!res.ok){alert('卸载失败');return;}await this.loadDashboard();alert('已删除节点记录。若节点 Agent 仍在线，请在宿主机手动执行 vtm-agent uninstall。');},async loadDashboard(){const res=await fetch('/api/v1/dashboard');if(!res.ok){this.rows=[];return;}const data=await res.json();const latest=data.latest_ingest||{};this.rows=(data.nodes||[]).map(n=>{const li=latest[n.node_id]||{};return{...n,used:(li.counters&&li.counters.total_gib)?`${li.counters.total_gib} GiB`:'-',timestamp:li.timestamp||'-'}});}},async mounted(){await this.renderAuth();await this.loadDashboard();}}).mount('#app');
 </script></body></html>"""
 @app.get("/api/v1/admin/status")
 def admin_status(session: str | None = Cookie(default=None)):
@@ -387,7 +399,7 @@ def raw_agent_bootstrap(api_key: str):
         raise HTTPException(status_code=404, detail="script not found")
     script_path = SCRIPTS_DIR / "agent-bootstrap.sh"
     if not script_path.exists():
-        raise HTTPException(status_code=500, detail="bootstrap script missing")
+        raise HTTPException(status_code=404, detail="bootstrap script missing")
     script = script_path.read_text(encoding="utf-8")
     return Response(content=script, media_type="text/x-shellscript")
 
@@ -432,10 +444,9 @@ def verify_node_login(node_id: str, payload: LoginVerifyRequest):
 @app.post("/api/v1/nodes/{node_id}/actions/uninstall")
 def queue_uninstall_action(node_id: str, session: str | None = Cookie(default=None)):
     _require_admin(session)
-    if node_id not in NODE_CONFIGS:
+    if not delete_node(node_id):
         raise HTTPException(status_code=404, detail="node not found")
-    NODE_PENDING_ACTIONS[node_id] = "uninstall"
-    return {"ok": True, "node_id": node_id, "action": "uninstall", "queued": True}
+    return {"ok": True, "node_id": node_id, "action": "uninstall", "deleted": True}
 
 
 @app.get("/api/v1/nodes/{node_id}/actions/next")
