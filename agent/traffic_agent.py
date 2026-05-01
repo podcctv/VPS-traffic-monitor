@@ -235,7 +235,12 @@ def post_payload_with_retry(
             return post_payload(url, api_key, secret, payload, timeout=timeout)
         except HTTPError as exc:
             if 400 <= exc.code < 500:
-                # auth/signature/config errors should fail fast.
+                # auth/signature/config errors should fail fast, but print detail first.
+                try:
+                    detail = exc.read().decode()
+                except Exception:
+                    detail = str(exc)
+                print(f"[{iso_now()}] upload client error={exc.code} detail={detail}")
                 raise
             if attempt > max_retries:
                 raise
