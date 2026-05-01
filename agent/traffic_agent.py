@@ -197,6 +197,23 @@ def save_state(path: str, state: dict) -> None:
     os.replace(tmp, path)
 
 
+def describe_exception(exc: Exception) -> str:
+    if isinstance(exc, HTTPError):
+        detail = ""
+        try:
+            raw = exc.read()
+            if raw:
+                detail = raw.decode(errors="replace")
+        except Exception:
+            detail = ""
+        if detail:
+            return f"http error={exc.code} reason={exc.reason} detail={detail}"
+        return f"http error={exc.code} reason={exc.reason}"
+    if isinstance(exc, URLError):
+        return f"url error={exc.reason}"
+    return str(exc)
+
+
 def post_payload(url: str, api_key: str, secret: str, payload: dict, timeout: int = 10) -> tuple[int, str]:
     body = json.dumps(payload, separators=(",", ":")).encode()
     ts = payload["timestamp"]
@@ -358,7 +375,7 @@ def main() -> int:
                 cycles_since_upload = 0
                 save_state(args.state_file, {"last_payload_fingerprint": last_fp, "cycles_since_upload": cycles_since_upload})
         except Exception as exc:
-            print(f"[{iso_now()}] upload failed: {exc}")
+            print(f"[{iso_now()}] upload failed: {describe_exception(exc)}")
             if args.interval <= 0:
                 return 1
             time.sleep(args.interval)
@@ -377,6 +394,7 @@ def main() -> int:
             break
         if args.interval <= 0:
             break
+        save_state(args.state_file, {"last_payload_fingerprint": last_fp, "cycles_since_upload": cycles_since_upload})
         time.sleep(args.interval)
     return 0
 
