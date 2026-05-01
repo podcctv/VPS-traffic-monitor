@@ -133,7 +133,15 @@ bash /usr/local/bin/vtm-agent upgrade
 
 ```bash
 bash /usr/local/bin/vtm-agent uninstall
+
+# 彻底卸载（包含 vnStat 包和历史流量数据库）
+bash /usr/local/bin/vtm-agent uninstall-all
 ```
+
+说明：
+- 重复执行 `install` 会覆盖 Agent 代码、配置和 systemd 单元，但默认保留 `vnstat` 历史数据（不清空原始流量库）。
+- `uninstall` 仅卸载 Agent，保留 vnStat 与历史数据。
+- `uninstall-all` 一键卸载 Agent + vnStat，并删除 vnStat 历史数据。
 
 后台支持“远程卸载客户端”按钮：中心端下发卸载动作，节点在下一次上报后自动执行 `uninstall`，包括停服务、删除 systemd 单元、删除配置与日志文件。
 

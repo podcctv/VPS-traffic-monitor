@@ -14,6 +14,7 @@ Usage:
   NODE_ID=... ENDPOINT=... API_KEY=... HMAC_SECRET=... [IFACE=eth0] [INTERVAL=120] bash agent-bootstrap.sh install
   bash agent-bootstrap.sh upgrade
   bash agent-bootstrap.sh uninstall
+  bash agent-bootstrap.sh uninstall-all
 USAGE
 }
 
@@ -138,6 +139,21 @@ SERVICE
 
   systemctl daemon-reload
   systemctl enable --now vnstat || true
+  local monitor_ifaces
+  monitor_ifaces="${IFACE:-all}"
+  if [[ "$monitor_ifaces" == "all" ]]; then
+    mapfile -t monitor_ifaces_list < <(ip -o link show | awk -F': ' '{print $2}' | awk -F'@' '{print $1}' | grep -E '^(eth|ens|enp|eno|bond|br|wg|tun)' || true)
+    for iface in "${monitor_ifaces_list[@]:-}"; do
+      [[ -n "$iface" ]] && vnstat --add -i "$iface" >/dev/null 2>&1 || true
+    done
+  else
+    IFS=',' read -r -a monitor_ifaces_list <<<"$monitor_ifaces"
+    for iface in "${monitor_ifaces_list[@]}"; do
+      iface="${iface// /}"
+      [[ -n "$iface" ]] && vnstat --add -i "$iface" >/dev/null 2>&1 || true
+    done
+  fi
+  vnstat --reload >/dev/null 2>&1 || true
   systemctl enable --now vps-traffic-agent.service
 }
 
@@ -185,13 +201,31 @@ do_uninstall() {
   rm -rf "$INSTALL_DIR"
   rm -rf /etc/vps-traffic-monitor
   rm -f /var/log/vps-traffic-monitor/agent.log
-  echo "agent uninstall done"
+  echo "agent uninstall done (vnstat and its historical data are kept)"
+}
+
+do_uninstall_all() {
+  do_uninstall
+  systemctl disable --now vnstat >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/vnstat.service /etc/systemd/system/vnstatd.service
+  systemctl daemon-reload
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get purge -y vnstat >/dev/null 2>&1 || true
+    apt-get autoremove -y >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf remove -y vnstat >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum remove -y vnstat >/dev/null 2>&1 || true
+  fi
+  rm -rf /var/lib/vnstat /var/log/vnstat /etc/vnstat.conf /etc/vnstat
+  echo "agent uninstall-all done (vnstat package + all vnstat data removed)"
 }
 
 case "$ACTION" in
   install) do_install ;;
   upgrade) do_upgrade ;;
   uninstall) do_uninstall ;;
+  uninstall-all) do_uninstall_all ;;
   -h|--help|help) usage ;;
   *) echo "unsupported action: $ACTION" >&2; usage; exit 1 ;;
 esac
