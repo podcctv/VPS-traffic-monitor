@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import socket
 import subprocess
@@ -161,6 +162,41 @@ def sign_payload(secret: str, timestamp: str, nonce: str, body: bytes) -> str:
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
 
 
+def make_payload_fingerprint(payload: dict) -> str:
+    """Generate a stable fingerprint for traffic content (excluding volatile fields)."""
+    stable = {
+        "node_id": payload.get("node_id"),
+        "iface": payload.get("iface"),
+        "counters": payload.get("counters", {}),
+        "interfaces": payload.get("interfaces", []),
+    }
+    body = json.dumps(stable, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(body).hexdigest()
+
+
+def load_state(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+        if isinstance(data, dict):
+            return data
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {}
+
+
+def save_state(path: str, state: dict) -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fp:
+        json.dump(state, fp, separators=(",", ":"), sort_keys=True)
+    os.replace(tmp, path)
+
+
 def post_payload(url: str, api_key: str, secret: str, payload: dict, timeout: int = 10) -> tuple[int, str]:
     body = json.dumps(payload, separators=(",", ":")).encode()
     ts = payload["timestamp"]
@@ -256,6 +292,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
     parser.add_argument("--max-retries", type=int, default=3, help="max retries per report cycle")
     parser.add_argument("--startup-jitter", type=int, default=3, help="random startup delay seconds")
+    parser.add_argument("--state-file", default="/var/lib/vps-traffic-monitor/agent-state.json", help="state file path")
+    parser.add_argument("--force-upload-every", type=int, default=10, help="force upload every N cycles even without traffic change")
     parser.add_argument(
         "--one-click",
         choices=["install", "uninstall"],
@@ -286,21 +324,34 @@ def main() -> int:
         print(f"[{iso_now()}] startup jitter sleep={jitter:.1f}s")
         time.sleep(jitter)
 
+    state = load_state(args.state_file)
+    last_fp = str(state.get("last_payload_fingerprint", ""))
+    cycles_since_upload = int(state.get("cycles_since_upload", 0))
+
     while True:
         try:
             data = run_vnstat_json()
             selected_ifaces = pick_interfaces(data, args.iface)
             iface_payloads = [build_payload(args.node_id, iface_data, args.version) for iface_data in selected_ifaces]
             payload = merge_payloads(args.node_id, iface_payloads, args.version)
-            status, body = post_payload_with_retry(
-                args.endpoint,
-                args.api_key,
-                args.hmac_secret,
-                payload,
-                timeout=args.timeout,
-                max_retries=max(0, args.max_retries),
-            )
-            print(f"[{iso_now()}] upload status={status} body={body}")
+            current_fp = make_payload_fingerprint(payload)
+            cycles_since_upload += 1
+            should_force = args.force_upload_every > 0 and cycles_since_upload >= args.force_upload_every
+            if current_fp == last_fp and not should_force:
+                print(f"[{iso_now()}] upload skipped: no traffic change")
+            else:
+                status, body = post_payload_with_retry(
+                    args.endpoint,
+                    args.api_key,
+                    args.hmac_secret,
+                    payload,
+                    timeout=args.timeout,
+                    max_retries=max(0, args.max_retries),
+                )
+                print(f"[{iso_now()}] upload status={status} body={body}")
+                last_fp = current_fp
+                cycles_since_upload = 0
+                save_state(args.state_file, {"last_payload_fingerprint": last_fp, "cycles_since_upload": cycles_since_upload})
         except Exception as exc:
             print(f"[{iso_now()}] upload failed: {exc}")
             if args.interval <= 0:
