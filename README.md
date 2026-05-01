@@ -36,12 +36,12 @@ docker compose version
 
 ## 快速开始（推荐）
 
-> 当前 `docker-compose.yml` 使用 `build: .`，因此**必须先克隆完整仓库**再启动。
+> 当前 `docker-compose.yml` 默认使用预编译镜像，Git 拉取后可直接运行；如需本地构建可启用 `build: .`。
 
 ```bash
 git clone https://github.com/podcctv/VPS-traffic-monitor.git
 cd VPS-traffic-monitor
-docker compose up -d --build
+docker compose up -d
 ```
 
 启动后可验证：
