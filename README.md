@@ -67,7 +67,7 @@ docker compose version
 ### 3.2 拉取代码
 
 ```bash
-git clone <your-repo-url> VPS-traffic-monitor
+git clone https://github.com/podcctv/VPS-traffic-monitor.git
 cd VPS-traffic-monitor
 ```
 
