@@ -1,24 +1,58 @@
-# 说明：
-# 1) 通过 Git 获取本仓库后，可直接 `docker compose up -d`（默认拉取预编译镜像）。
-# 2) 如需本地自行构建，取消下方 build 注释并加 --build。
+version: '3.9'
 
 services:
-  central:
-    image: ghcr.io/podcctv/vps-traffic-monitor:latest
+  influxdb:
+    image: influxdb:2.7
+    container_name: vtm-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-admin123456}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-vtm}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-traffic_raw}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN:-change-me-token}
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: vtm-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  central-api:
     build: .
-    pull_policy: build
-    container_name: vps-traffic-central
+    container_name: vtm-central-api
+    environment:
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_ORG=${INFLUXDB_ORG:-vtm}
+      - INFLUX_BUCKET=${INFLUXDB_BUCKET:-traffic_raw}
+      - INFLUX_TOKEN=${INFLUXDB_TOKEN:-change-me-token}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - influxdb
+      - redis
     ports:
       - "8000:8000"
     restart: unless-stopped
 
-x-one-click-pull-script: |
-  #!/usr/bin/env bash
-  set -euo pipefail
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: vtm-grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
 
-  COMPOSE_URL="$${COMPOSE_URL:-https://raw.githubusercontent.com/podcctv/VPS-traffic-monitor/main/docker-compose.yml}"
-  TARGET_FILE="$${TARGET_FILE:-docker-compose.yml}"
-
-  curl -fsSL "$${COMPOSE_URL}" -o "$${TARGET_FILE}"
-  docker compose -f "$${TARGET_FILE}" pull
-  docker compose -f "$${TARGET_FILE}" up -d
+volumes:
+  influxdb-data:
+  redis-data:
+  grafana-data:

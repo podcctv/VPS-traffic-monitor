@@ -1,205 +1,34 @@
-# VPS Traffic Monitor
+# VPS Traffic Monitor（新架构版）
 
-一个用于 **VPS 流量采集、上报与可视化** 的轻量级项目：
-- **Central（中心端）**：提供配置管理、安装脚本生成、数据接收与展示页面。
-- **Agent（节点端）**：部署在各 VPS 上，定时采集网卡流量并上报到中心端。
-
----
-
-## 功能概览
-
-- 节点配置管理（节点 ID、月流量配额、重置日）
-- 自动生成节点安装命令（直接执行 Bash 脚本）
-- 节点脚本支持 `install / upgrade / uninstall`，并支持通过 `git` 升级本地文件与脚本自身
-- 流量数据上报接口（支持 API Key + HMAC）
-- 登录校验接口（可按节点开关 + token 校验）
-- Web 首次登录强制设置管理员账号密码，登录后才能配置与查看
-- Web 页面查看节点状态与用量
-- Docker Compose 一键启动中心端
+本项目已切换为 **“节点本地采集 + 中心端时序存储 + 业务展示层”** 架构，目标是：
+- 采集链路尽量使用成熟组件；
+- 中心端只做你关心的流量业务视图与账期逻辑；
+- 允许后续平滑扩展到更多节点和更复杂统计。
 
 ---
 
-## 运行要求
+## 1. 新架构概览
 
-- Linux 服务器（推荐 Ubuntu / Debian）
-- Docker 24+
-- Docker Compose Plugin
-
-环境检查：
-
-```bash
-docker --version
-docker compose version
+```text
+[VPS Node]
+  vnstatd / telegraf
+      ↓
+  traffic_agent.py（兼容采集上报）
+      ↓ HTTPS + API Key + HMAC
+[Center]
+  FastAPI (central-api)
+      ├── InfluxDB (raw_metrics 时序数据)
+      ├── Redis (在线状态/短缓存)
+      └── billing/aggregation（账期与聚合，API层逐步承接）
+      ↓
+  Grafana（运维视图） + 自定义前端（业务视图）
 ```
+
+> 当前仓库已完成基础设施层切换（InfluxDB/Redis/Grafana/中心 API 编排），并保留现有 Agent 上报兼容能力。
 
 ---
 
-## 快速开始（推荐）
-
-> 当前 `docker-compose.yml` 会优先尝试预编译镜像；当镜像仓库不可访问时会自动改为本地构建。
-
-```bash
-git clone https://github.com/podcctv/VPS-traffic-monitor.git
-cd VPS-traffic-monitor
-docker compose up -d
-```
-
-启动后可验证：
-
-```bash
-curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "central ok"
-```
-
-浏览器访问：
-
-- `http://<你的服务器IP>:8000/`
-
-如果开启防火墙，请放行 `8000/tcp`。
-
-
-
-## 中心端一键脚本（安装 / 升级 / 卸载）
-
-中心端支持通过一键脚本完成：
-- 安装（install）
-- 升级（upgrade）
-- 卸载（uninstall）
-
-你可以在中心端页面生成命令，也可以直接使用下面的方式：
-
-### 1) 安装
-
-```bash
-curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- install
-```
-
-### 2) 升级
-
-```bash
-curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade
-```
-
-### 3) 卸载
-
-```bash
-curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- uninstall
-```
-
-支持环境变量：
-- `REPO_URL`：仓库地址（默认 `https://github.com/podcctv/VPS-traffic-monitor.git`）
-- `INSTALL_DIR`：部署目录（默认 `/opt/VPS-traffic-monitor`）
-- `BRANCH`：分支（默认 `main`）
-
-### 脚本工作方式
-
-- 一键脚本会通过 `git` 将仓库下载到本地目录。
-- 升级时会更新本地 `git` 仓库内容，并重建/重启容器。
-- 脚本支持“自更新”：会优先刷新脚本本身，再执行 install/upgrade/uninstall。
-- 因此它既可以更新自己，也可以更新 `git` 目录中的全部项目文件。
-
-如果你希望本地持久化一个“可自我更新”的命令，可先保存后执行：
-
-```bash
-curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' -o /usr/local/bin/vtm-central
-chmod +x /usr/local/bin/vtm-central
-/usr/local/bin/vtm-central upgrade
-```
-
-后续每次运行 `/usr/local/bin/vtm-central` 时都会优先尝试刷新该脚本本身。
-
----
-
-## 节点安装（Agent）
-
-在中心端页面填写节点信息后，可获得一键安装命令（直接 Bash，不依赖中心端动态生成安装脚本）。示例：
-
-```bash
-curl -fsSL 'https://your-central.example.com/raw/<api-key>/agent-bootstrap.sh' \
-  | sudo NODE_ID='demo-node' ENDPOINT='https://your-central.example.com/api/v1/ingest' API_KEY='<api-key>' HMAC_SECRET='<hmac-secret>' bash -s -- install
-
-# 可选：指定单网卡（不传则安装时会交互选择，默认 all 监控全部网卡）
-# ... IFACE='eth0' bash -s -- install
-```
-
-如果节点上已存在 Agent，再次执行 `install` 会先提示“检测到已安装 Agent”，然后覆盖安装（更新代码、配置和 systemd 单元）。
-
-升级示例（会 `git fetch/reset` 并刷新本地脚本自身）：
-
-```bash
-bash /usr/local/bin/vtm-agent upgrade
-```
-
-卸载示例：
-
-```bash
-bash /usr/local/bin/vtm-agent uninstall
-
-# 彻底卸载（包含 vnStat 包和历史流量数据库）
-bash /usr/local/bin/vtm-agent uninstall-all
-```
-
-说明：
-- 重复执行 `install` 会覆盖 Agent 代码、配置和 systemd 单元，但默认保留 `vnstat` 历史数据（不清空原始流量库）。
-- `uninstall` 仅卸载 Agent，保留 vnStat 与历史数据。
-- `uninstall-all` 一键卸载 Agent + vnStat，并删除 vnStat 历史数据。
-
-后台支持“远程卸载客户端”按钮：中心端下发卸载动作，节点在下一次上报后自动执行 `uninstall`，包括停服务、删除 systemd 单元、删除配置与日志文件。
-
----
-
-## API 使用（可选）
-
-可通过 `POST /api/v1/quick-setup` 创建节点配置并获取安装命令。
-
-请求示例：
-
-```json
-{
-  "node_id": "demo-node",
-  "monthly_quota_gb": 1024,
-  "reset_day": 1
-}
-```
-
-返回内容包含：
-- `config`：节点完整配置
-- `install_command`：一键安装命令
-
-新增接口：
-- `POST /api/v1/nodes/{node_id}/login-verify`：登录验证
-- `GET /api/v1/dashboard`：中心端展示数据（节点配置 + 最新上报）
-
----
-
-## 本地开发运行
-
-### 1) 启动中心端（非 Docker）
-
-```bash
-pip install fastapi uvicorn
-uvicorn central.server:app --host 0.0.0.0 --port 8000
-```
-
-### 2) 手动运行 Agent
-
-```bash
-python3 agent/traffic_agent.py \
-  --endpoint http://127.0.0.1:8000/api/v1/ingest \
-  --api-key demo-key \
-  --hmac-secret demo-secret \
-  --node-id demo-node \
-  --iface all \
-  --interval 120
-```
-
-`--iface` 支持：
-- `all`：监控并汇总全部网卡（推荐）
-- 单个网卡名：如 `eth0`、`ens3`
-- 多网卡逗号分隔：如 `eth0,ens3`
-
----
-
-## 目录结构
+## 2. 目录结构
 
 ```text
 .
@@ -209,19 +38,107 @@ python3 agent/traffic_agent.py \
 │   └── server.py
 ├── docker-compose.yml
 ├── Dockerfile
+├── ARCHITECTURE_MIGRATION_CN.md
 └── README.md
 ```
 
 ---
 
-## 常见问题
+## 3. 快速启动（新架构）
 
-### 1) 为什么不能只下载 `docker-compose.yml` 直接启动？
+### 3.1 配置环境变量（建议）
 
-因为当前 compose 配置使用 `build: .`，需要本地存在 `Dockerfile` 和项目源码作为构建上下文。
+```bash
+cp .env.example .env 2>/dev/null || true
+# 至少设置：INFLUXDB_TOKEN, INFLUXDB_PASSWORD
+```
 
-### 2) 生产环境建议
+你也可以直接通过 shell 导出：
 
-- 使用 HTTPS 暴露中心端
-- 将 API Key / HMAC Secret 设置为高强度随机值
-- 配置反向代理与基础访问控制
+```bash
+export INFLUXDB_TOKEN='replace-with-strong-token'
+export INFLUXDB_PASSWORD='replace-with-strong-password'
+export INFLUXDB_ORG='vtm'
+export INFLUXDB_BUCKET='traffic_raw'
+```
+
+### 3.2 启动服务
+
+```bash
+docker compose up -d --build
+```
+
+### 3.3 验证
+
+```bash
+# 中心 API
+curl -fsS http://127.0.0.1:8000/docs >/dev/null && echo 'central-api ok'
+
+# InfluxDB
+curl -fsS http://127.0.0.1:8086/health
+
+# Grafana
+curl -fsS http://127.0.0.1:3000/api/health
+```
+
+默认端口：
+- `8000`：Central API
+- `8086`：InfluxDB
+- `3000`：Grafana
+
+---
+
+## 4. 节点端接入
+
+### 4.1 保留现有 Python Agent（兼容模式）
+
+```bash
+python3 agent/traffic_agent.py \
+  --endpoint http://<central-host>:8000/api/v1/ingest \
+  --api-key <api-key> \
+  --hmac-secret <hmac-secret> \
+  --node-id <node-id> \
+  --iface all \
+  --interval 120
+```
+
+### 4.2 推荐迁移到 Telegraf（生产建议）
+
+建议采用双写验证：
+1. 维持现有 Agent 上报；
+2. 并行部署 Telegraf；
+3. 对比 24h 数据偏差（目标 < 1~2%）；
+4. 切换主链路到 Telegraf。
+
+详细步骤见：`ARCHITECTURE_MIGRATION_CN.md`。
+
+---
+
+## 5. 数据分层建议（中心端）
+
+- `raw_metrics`：1~5 分钟粒度原始计数；
+- `agg_hourly/agg_daily`：小时/天聚合；
+- `billing_usage`：账期口径（baseline + 用量）。
+
+核心原则：**页面优先读聚合层和账期层，不直接扫描 raw 全量数据。**
+
+---
+
+## 6. 生产部署建议
+
+- 全站 HTTPS（建议反向代理 + TLS）；
+- API Key/HMAC Secret 定期轮换；
+- InfluxDB token 最小权限化；
+- 对外仅暴露必要端口（通常只暴露 80/443，内部服务走内网）；
+- 增加备份策略（InfluxDB + Redis 持久化卷）。
+
+---
+
+## 7. 路线图
+
+- [x] 基础设施改造为 InfluxDB + Redis + Grafana + Central API
+- [x] 兼容现有 Agent 上报链路
+- [ ] 中心端账期引擎（baseline/reset/counter reset）
+- [ ] 聚合任务（hourly/daily）
+- [ ] 自定义业务展示页（节点总览/详情/告警）
+
