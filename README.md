@@ -186,6 +186,20 @@ python3 agent/traffic_agent.py \
   --interval 120
 ```
 
+### 5.3 Agent 一键部署 / 一键卸载
+
+中心端 Quick Setup 会返回一键安装命令（`install_command`），节点执行后会自动安装依赖、写入 systemd 服务并启动上报。
+
+如需手工执行脚本，也可使用以下动作别名：
+
+```bash
+# 一键部署（等价于 install）
+bash /usr/local/bin/vtm-agent deploy
+
+# 一键卸载（等价于 uninstall）
+bash /usr/local/bin/vtm-agent remove
+```
+
 ### 5.2 推荐迁移到 Telegraf（生产建议）
 
 建议采用双写验证：

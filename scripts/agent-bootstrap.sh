@@ -12,9 +12,12 @@ usage() {
   cat <<USAGE
 Usage:
   NODE_ID=... ENDPOINT=... API_KEY=... HMAC_SECRET=... [IFACE=eth0] [INTERVAL=120] bash agent-bootstrap.sh install
+  NODE_ID=... ENDPOINT=... API_KEY=... HMAC_SECRET=... [IFACE=eth0] [INTERVAL=120] bash agent-bootstrap.sh deploy
   bash agent-bootstrap.sh upgrade
   bash agent-bootstrap.sh uninstall
+  bash agent-bootstrap.sh remove
   bash agent-bootstrap.sh uninstall-all
+  bash agent-bootstrap.sh remove-all
 USAGE
 }
 
@@ -222,10 +225,10 @@ do_uninstall_all() {
 }
 
 case "$ACTION" in
-  install) do_install ;;
+  install|deploy) do_install ;;
   upgrade) do_upgrade ;;
-  uninstall) do_uninstall ;;
-  uninstall-all) do_uninstall_all ;;
+  uninstall|remove) do_uninstall ;;
+  uninstall-all|remove-all) do_uninstall_all ;;
   -h|--help|help) usage ;;
   *) echo "unsupported action: $ACTION" >&2; usage; exit 1 ;;
 esac
