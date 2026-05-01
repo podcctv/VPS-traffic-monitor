@@ -44,16 +44,105 @@
 
 ---
 
-## 3. 快速启动（新架构）
+## 3. 全新安装（从 0 到可用）
 
-### 3.1 配置环境变量（建议）
+> 适用于第一次部署，或准备在一台全新 Linux 服务器（建议 Ubuntu 22.04+/Debian 12+）上安装。
+
+### 3.1 前置条件
+
+- 一台可联网的 Linux 服务器（建议 `2C4G` 起步）；
+- 已安装 Git；
+- 已安装 Docker Engine（建议 24+）；
+- 已安装 Docker Compose Plugin（支持 `docker compose` 命令）；
+- 防火墙放行中心端口（最少 `8000/8086/3000`，生产建议仅暴露 `80/443` 反向代理）。
+
+可用以下命令自检：
 
 ```bash
-cp .env.example .env 2>/dev/null || true
-# 至少设置：INFLUXDB_TOKEN, INFLUXDB_PASSWORD
+git --version
+docker --version
+docker compose version
 ```
 
-你也可以直接通过 shell 导出：
+### 3.2 拉取代码
+
+```bash
+git clone <your-repo-url> VPS-traffic-monitor
+cd VPS-traffic-monitor
+```
+
+### 3.3 创建环境变量文件
+
+项目目前未内置 `.env.example`，请手动创建 `.env`：
+
+```bash
+cat > .env <<'ENV'
+INFLUXDB_TOKEN=replace-with-strong-token
+INFLUXDB_PASSWORD=replace-with-strong-password
+INFLUXDB_ORG=vtm
+INFLUXDB_BUCKET=traffic_raw
+ENV
+```
+
+> 建议把 `INFLUXDB_TOKEN` 与 `INFLUXDB_PASSWORD` 设置为长度 24+ 的高强度随机字符串。
+
+### 3.4 首次启动
+
+```bash
+docker compose up -d --build
+```
+
+首次启动会拉取镜像并构建中心 API，耗时取决于网络环境。
+
+### 3.5 健康检查
+
+```bash
+# 容器状态
+docker compose ps
+
+# 中心 API 文档
+curl -fsS http://127.0.0.1:8000/docs >/dev/null && echo 'central-api ok'
+
+# InfluxDB
+curl -fsS http://127.0.0.1:8086/health
+
+# Grafana
+curl -fsS http://127.0.0.1:3000/api/health
+```
+
+### 3.6 默认账号与端口
+
+默认端口：
+- `8000`：Central API
+- `8086`：InfluxDB
+- `3000`：Grafana
+
+默认账号（仅本地初始化用途，请上线前修改）：
+- Grafana: `admin / admin`
+
+### 3.7 升级与重建
+
+```bash
+# 拉取最新代码
+git pull
+
+# 重建并滚动更新
+docker compose up -d --build
+```
+
+如需完全重置（会删除容器和匿名卷，请谨慎）：
+
+```bash
+docker compose down -v
+```
+
+---
+
+## 4. 快速启动（已有环境）
+
+### 4.1 配置环境变量（建议）
+
+如果你已经有外部密钥管理系统，也可以直接通过 shell 导出：
 
 ```bash
 export INFLUXDB_TOKEN='replace-with-strong-token'
@@ -62,13 +151,13 @@ export INFLUXDB_ORG='vtm'
 export INFLUXDB_BUCKET='traffic_raw'
 ```
 
-### 3.2 启动服务
+### 4.2 启动服务
 
 ```bash
 docker compose up -d --build
 ```
 
-### 3.3 验证
+### 4.3 验证
 
 ```bash
 # 中心 API
@@ -81,16 +170,11 @@ curl -fsS http://127.0.0.1:8086/health
 curl -fsS http://127.0.0.1:3000/api/health
 ```
 
-默认端口：
-- `8000`：Central API
-- `8086`：InfluxDB
-- `3000`：Grafana
-
 ---
 
-## 4. 节点端接入
+## 5. 节点端接入
 
-### 4.1 保留现有 Python Agent（兼容模式）
+### 5.1 保留现有 Python Agent（兼容模式）
 
 ```bash
 python3 agent/traffic_agent.py \
@@ -102,7 +186,7 @@ python3 agent/traffic_agent.py \
   --interval 120
 ```
 
-### 4.2 推荐迁移到 Telegraf（生产建议）
+### 5.2 推荐迁移到 Telegraf（生产建议）
 
 建议采用双写验证：
 1. 维持现有 Agent 上报；
@@ -114,7 +198,7 @@ python3 agent/traffic_agent.py \
 
 ---
 
-## 5. 数据分层建议（中心端）
+## 6. 数据分层建议（中心端）
 
 - `raw_metrics`：1~5 分钟粒度原始计数；
 - `agg_hourly/agg_daily`：小时/天聚合；
@@ -124,7 +208,7 @@ python3 agent/traffic_agent.py \
 
 ---
 
-## 6. 生产部署建议
+## 7. 生产部署建议
 
 - 全站 HTTPS（建议反向代理 + TLS）；
 - API Key/HMAC Secret 定期轮换；
@@ -134,11 +218,10 @@ python3 agent/traffic_agent.py \
 
 ---
 
-## 7. 路线图
+## 8. 路线图
 
 - [x] 基础设施改造为 InfluxDB + Redis + Grafana + Central API
 - [x] 兼容现有 Agent 上报链路
 - [ ] 中心端账期引擎（baseline/reset/counter reset）
 - [ ] 聚合任务（hourly/daily）
 - [ ] 自定义业务展示页（节点总览/详情/告警）
-
