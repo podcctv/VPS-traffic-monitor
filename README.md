@@ -36,7 +36,7 @@ docker compose version
 
 ## 快速开始（推荐）
 
-> 当前 `docker-compose.yml` 默认使用预编译镜像，Git 拉取后可直接运行；如需本地构建可启用 `build: .`。
+> 当前 `docker-compose.yml` 会优先尝试预编译镜像；当镜像仓库不可访问时会自动改为本地构建。
 
 ```bash
 git clone https://github.com/podcctv/VPS-traffic-monitor.git

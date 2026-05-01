@@ -269,7 +269,10 @@ else
 fi
 
 cd "$INSTALL_DIR"
-docker compose pull || true
+# Try pulling prebuilt image first; if registry access is denied, fallback to local build.
+if ! docker compose pull; then
+  echo "docker compose pull failed, fallback to local build" >&2
+fi
 docker compose up -d --build --remove-orphans
 
 # Optional: refresh local upgrade script file itself.
