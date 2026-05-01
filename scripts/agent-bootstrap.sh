@@ -100,6 +100,17 @@ SERVICE
   systemctl enable --now vps-traffic-agent.service
 }
 
+detect_existing_agent() {
+  local detected=0
+  if [[ -d "$INSTALL_DIR" ]] || [[ -f "$CONFIG_PATH" ]] || systemctl list-unit-files | grep -q '^vps-traffic-agent.service'; then
+    detected=1
+  fi
+  if [[ "$detected" -eq 1 ]]; then
+    echo "[warn] detected existing vps-traffic-agent deployment on this node." >&2
+    echo "[warn] install action will overwrite local agent files, config and systemd unit." >&2
+  fi
+}
+
 refresh_self() {
   local source_script="$INSTALL_DIR/scripts/agent-bootstrap.sh"
   if [[ -f "$source_script" ]] && [[ -w "$(dirname "$SELF_PATH")" ]]; then
@@ -109,6 +120,7 @@ refresh_self() {
 }
 
 do_install() {
+  detect_existing_agent
   install_pkgs
   sync_repo
   write_config
