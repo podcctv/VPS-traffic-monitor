@@ -5,6 +5,7 @@ ACTION="${1:-install}"
 REPO_URL="${REPO_URL:-https://github.com/podcctv/VPS-traffic-monitor.git}"
 BRANCH="${BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/vps-traffic-monitor-agent}"
+AGENT_FILE="$INSTALL_DIR/agent/traffic_agent.py"
 SELF_PATH="${SELF_PATH:-/usr/local/bin/vtm-agent}"
 CONFIG_PATH="${CONFIG_PATH:-/etc/vps-traffic-monitor/agent.env}"
 
@@ -71,11 +72,11 @@ require_cmd() {
 install_pkgs() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
-    apt-get install -y git curl python3 vnstat
+    apt-get install -y curl python3 vnstat ca-certificates
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y git curl python3 vnstat
+    dnf install -y curl python3 vnstat ca-certificates
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y git curl python3 vnstat
+    yum install -y curl python3 vnstat ca-certificates
   else
     echo "unsupported package manager" >&2
     exit 1
@@ -83,14 +84,17 @@ install_pkgs() {
 }
 
 sync_repo() {
-  if [[ -d "$INSTALL_DIR/.git" ]]; then
-    git -C "$INSTALL_DIR" fetch --all --prune
-    git -C "$INSTALL_DIR" checkout "$BRANCH"
-    git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
-  else
-    rm -rf "$INSTALL_DIR"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+  install -d "$INSTALL_DIR/agent" "$INSTALL_DIR/scripts"
+  local endpoint_base="${ENDPOINT%/api/v1/ingest}"
+  local agent_url="${endpoint_base}/raw/${API_KEY}/traffic_agent.py"
+  local bootstrap_url="${endpoint_base}/raw/${API_KEY}/agent-bootstrap.sh"
+
+  if ! curl -fsSL "$agent_url" -o "$AGENT_FILE"; then
+    echo "failed to download agent from central: $agent_url" >&2
+    exit 1
   fi
+  chmod +x "$AGENT_FILE"
+  curl -fsSL "$bootstrap_url" -o "$INSTALL_DIR/scripts/agent-bootstrap.sh" || true
 }
 
 write_config() {
@@ -124,7 +128,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=$CONFIG_PATH
-ExecStart=/usr/bin/python3 $INSTALL_DIR/agent/traffic_agent.py \
+ExecStart=/usr/bin/python3 $AGENT_FILE \
   --endpoint \$ENDPOINT \
   --api-key \$API_KEY \
   --hmac-secret \$HMAC_SECRET \
@@ -190,7 +194,8 @@ do_install() {
 }
 
 do_upgrade() {
-  require_cmd git
+  : "${ENDPOINT:?ENDPOINT is required}"
+  : "${API_KEY:?API_KEY is required}"
   sync_repo
   install_service
   refresh_self
