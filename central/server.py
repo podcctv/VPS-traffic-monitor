@@ -198,7 +198,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/vps-traffic-monitor/agent.env
-ExecStart=/usr/bin/python3 /opt/vps-traffic-monitor/traffic_agent.py \\
+ExecStart=/usr/bin/python3 -u /opt/vps-traffic-monitor/traffic_agent.py \\
   --endpoint $ENDPOINT \\
   --api-key $API_KEY \\
   --hmac-secret $HMAC_SECRET \\
