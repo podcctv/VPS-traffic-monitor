@@ -45,6 +45,24 @@ def pick_interface(data: dict, iface: str | None) -> dict:
     return interfaces[0]
 
 
+def pick_interfaces(data: dict, iface: str | None) -> list[dict]:
+    interfaces = data.get("interfaces", [])
+    if not interfaces:
+        raise RuntimeError("vnstat JSON missing interfaces")
+    if not iface:
+        return [interfaces[0]]
+    normalized = iface.strip().lower()
+    if normalized in {"all", "*"}:
+        return interfaces
+    wanted = {item.strip() for item in iface.split(",") if item.strip()}
+    if not wanted:
+        return [interfaces[0]]
+    selected = [item for item in interfaces if item.get("name") in wanted]
+    if not selected:
+        raise RuntimeError(f"interfaces not found: {iface}")
+    return selected
+
+
 def build_payload(node_id: str, iface_data: dict, version: str) -> dict:
     traffic = iface_data.get("traffic", {})
     total = traffic.get("total", {})
@@ -85,6 +103,34 @@ def build_payload(node_id: str, iface_data: dict, version: str) -> dict:
         "daily": daily,
         "agent_version": version,
         "nonce": secrets.token_hex(16),
+    }
+
+
+def merge_payloads(node_id: str, iface_payloads: list[dict], version: str) -> dict:
+    if len(iface_payloads) == 1:
+        return iface_payloads[0]
+    merged_counters = {
+        "rx_total_bytes": 0,
+        "tx_total_bytes": 0,
+        "rx_today_bytes": 0,
+        "tx_today_bytes": 0,
+        "rx_month_bytes": 0,
+        "tx_month_bytes": 0,
+    }
+    for payload in iface_payloads:
+        for key in merged_counters:
+            merged_counters[key] += int(payload["counters"].get(key, 0))
+    return {
+        "node_id": node_id,
+        "hostname": socket.gethostname(),
+        "timestamp": iso_now(),
+        "iface": "all",
+        "counters": merged_counters,
+        "hourly": [],
+        "daily": [],
+        "agent_version": version,
+        "nonce": secrets.token_hex(16),
+        "interfaces": [{"name": p["iface"], "counters": p["counters"]} for p in iface_payloads],
     }
 
 
@@ -177,8 +223,9 @@ def main() -> int:
     while True:
         try:
             data = run_vnstat_json()
-            iface_data = pick_interface(data, args.iface)
-            payload = build_payload(args.node_id, iface_data, args.version)
+            selected_ifaces = pick_interfaces(data, args.iface)
+            iface_payloads = [build_payload(args.node_id, iface_data, args.version) for iface_data in selected_ifaces]
+            payload = merge_payloads(args.node_id, iface_payloads, args.version)
             status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
             print(f"[{iso_now()}] upload status={status} body={body}")
         except (subprocess.SubprocessError, json.JSONDecodeError, HTTPError, URLError, OSError, ValueError) as exc:
