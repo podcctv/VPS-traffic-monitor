@@ -19,6 +19,7 @@ import socket
 import subprocess
 import time
 from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib import request
 
@@ -174,14 +175,26 @@ def main() -> int:
         return 0
 
     while True:
-        data = run_vnstat_json()
-        iface_data = pick_interface(data, args.iface)
-        payload = build_payload(args.node_id, iface_data, args.version)
-        status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
-        print(f"[{iso_now()}] upload status={status} body={body}")
+        try:
+            data = run_vnstat_json()
+            iface_data = pick_interface(data, args.iface)
+            payload = build_payload(args.node_id, iface_data, args.version)
+            status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
+            print(f"[{iso_now()}] upload status={status} body={body}")
+        except (subprocess.SubprocessError, json.JSONDecodeError, HTTPError, URLError, OSError, ValueError) as exc:
+            print(f"[{iso_now()}] upload failed: {exc}")
+            if args.interval <= 0:
+                return 1
+            time.sleep(args.interval)
+            continue
+
         endpoint_base = args.endpoint.rsplit("/api/v1/ingest", 1)[0]
         action_url = args.action_endpoint_template.format(base=endpoint_base, node_id=args.node_id)
-        action_resp = get_next_action(action_url, args.api_key)
+        try:
+            action_resp = get_next_action(action_url, args.api_key)
+        except (HTTPError, URLError, json.JSONDecodeError, ValueError) as exc:
+            print(f"[{iso_now()}] action poll failed: {exc}")
+            action_resp = {}
         if action_resp.get("action"):
             execute_action(action_resp["action"])
             print(f"[{iso_now()}] remote action executed: {action_resp['action']}")
