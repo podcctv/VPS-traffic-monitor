@@ -189,9 +189,36 @@ python3 agent/traffic_agent.py \
 - 单个网卡名：如 `eth0`、`ens3`
 - 多网卡逗号分隔：如 `eth0,ens3`
 
----
+### 一键安装/卸载（由中心端下发）
+中心端先在节点配置中写入脚本链接（必须是 HTTPS）：
 
-## 目录结构
+- `install_script_url`
+- `uninstall_script_url`
+
+agent 端执行一键安装：
+
+```bash
+python3 agent/traffic_agent.py \
+  --endpoint https://your-central.example.com/api/v1/ingest \
+  --api-key demo-key \
+  --hmac-secret demo-secret \
+  --node-id demo-node \
+  --one-click install
+```
+
+agent 端执行一键卸载：
+
+```bash
+python3 agent/traffic_agent.py \
+  --endpoint https://your-central.example.com/api/v1/ingest \
+  --api-key demo-key \
+  --hmac-secret demo-secret \
+  --node-id demo-node \
+  --one-click uninstall
+```
+
+## 中心端
+安装依赖：
 
 ```text
 .
@@ -206,14 +233,17 @@ python3 agent/traffic_agent.py \
 
 ---
 
-## 常见问题
+```bash
+uvicorn central.server:app --host 0.0.0.0 --port 8000
+```
 
-### 1) 为什么不能只下载 `docker-compose.yml` 直接启动？
+### 节点配置接口
+- `GET /api/v1/nodes/{node_id}/config`
+- `PUT /api/v1/nodes/{node_id}/config`
 
-因为当前 compose 配置使用 `build: .`，需要本地存在 `Dockerfile` 和项目源码作为构建上下文。
-
-### 2) 生产环境建议
-
-- 使用 HTTPS 暴露中心端
-- 将 API Key / HMAC Secret 设置为高强度随机值
-- 配置反向代理与基础访问控制
+可配置项：
+- `monthly_quota_gb`：月总流量（GB）
+- `reset_day`：每月重置日期（1-31）
+- `login_verify_enabled`：是否开启登录验证
+- `install_script_url`：agent 一键安装脚本地址（仅支持 HTTPS）
+- `uninstall_script_url`：agent 一键卸载脚本地址（仅支持 HTTPS）

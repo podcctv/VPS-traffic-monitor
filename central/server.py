@@ -22,8 +22,7 @@ from urllib.parse import quote
 from dataclasses import dataclass, asdict
 from typing import Dict
 
-from fastapi import Cookie, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, HttpUrl, conint, field_validator
 
 app = FastAPI(title="VPS Traffic Monitor Central API", version="0.3.0")
@@ -40,11 +39,6 @@ class NodeConfig:
     login_verify_token: str = "demo-login-token"
     install_script_url: str | None = None
     uninstall_script_url: str | None = None
-    agent_endpoint: str = "https://central.example.com/api/v1/ingest"
-    agent_api_key: str = "demo-key"
-    agent_hmac_secret: str = "demo-secret"
-    agent_iface: str = "eth0"
-    agent_interval: int = 120
 
 
 NODE_CONFIGS: Dict[str, NodeConfig] = {}
@@ -63,19 +57,14 @@ class ConfigUpdate(BaseModel):
     login_verify_token: str = Field(..., min_length=6)
     install_script_url: HttpUrl | None = None
     uninstall_script_url: HttpUrl | None = None
-    agent_endpoint: HttpUrl
-    agent_api_key: str = Field(..., min_length=3)
-    agent_hmac_secret: str = Field(..., min_length=6)
-    agent_iface: str = Field(default="eth0", min_length=1)
-    agent_interval: conint(ge=30, le=3600) = 120
 
-    @field_validator("install_script_url", "uninstall_script_url", "agent_endpoint")
+    @field_validator("install_script_url", "uninstall_script_url")
     @classmethod
     def enforce_https(cls, value: HttpUrl | None) -> HttpUrl | None:
         if value is None:
             return value
         if value.scheme != "https":
-            raise ValueError("url must use https")
+            raise ValueError("script url must use https")
         return value
 
 
