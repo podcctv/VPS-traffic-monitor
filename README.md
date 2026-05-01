@@ -200,6 +200,27 @@ bash /usr/local/bin/vtm-agent deploy
 bash /usr/local/bin/vtm-agent remove
 ```
 
+
+### 5.4 查看 Agent 上报日志（排查是否成功上报）
+
+> `systemctl status` 只显示服务启停，不会展示每次上报详情。
+
+```bash
+# 实时查看 Agent 业务日志（包含 upload status / upload failed）
+tail -f /var/log/vps-traffic-monitor/agent.log
+
+# 查看最近 200 行
+tail -n 200 /var/log/vps-traffic-monitor/agent.log
+
+# 同时看 systemd 事件
+journalctl -u vps-traffic-agent.service -n 100 --no-pager
+```
+
+日志关键字：
+- `upload status=200`：上报成功；
+- `upload failed:`：上报失败；
+- `upload skipped: no traffic change`：本轮流量无变化，按策略跳过。
+
 ### 5.2 推荐迁移到 Telegraf（生产建议）
 
 建议采用双写验证：

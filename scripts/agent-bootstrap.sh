@@ -128,7 +128,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=$CONFIG_PATH
-ExecStart=/usr/bin/python3 $AGENT_FILE \
+ExecStart=/usr/bin/python3 -u $AGENT_FILE \
   --endpoint \$ENDPOINT \
   --api-key \$API_KEY \
   --hmac-secret \$HMAC_SECRET \
