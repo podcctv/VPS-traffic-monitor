@@ -172,6 +172,93 @@ curl -fsS http://127.0.0.1:3000/api/health
 
 ---
 
+
+## 4.4 已安装环境更新方案（Agent + 中心端）
+
+> 适用于你已经在生产或测试环境运行本项目，且希望在**尽量不停机**的前提下完成升级。
+
+### 4.4.1 更新前检查（中心端）
+
+```bash
+cd /opt/VPS-traffic-monitor  # 按你的实际部署路径
+git status
+git remote -v
+docker compose ps
+```
+
+如果 `git status` 存在本地改动，建议先提交或备份，避免 `git pull` 冲突。
+
+### 4.4.2 中心端标准升级流程
+
+```bash
+cd /opt/VPS-traffic-monitor
+
+# 1) 拉取最新代码
+git fetch --all --tags
+git pull --ff-only
+
+# 2) 可选：预拉取镜像，减少切换时间
+docker compose pull
+
+# 3) 重新构建并更新服务
+docker compose up -d --build
+
+# 4) 清理无用镜像（可选）
+docker image prune -f
+```
+
+升级后验证：
+
+```bash
+docker compose ps
+curl -fsS http://127.0.0.1:8000/docs >/dev/null && echo 'central-api ok'
+curl -fsS http://127.0.0.1:8086/health
+curl -fsS http://127.0.0.1:3000/api/health
+```
+
+### 4.4.3 Agent 端批量升级流程（已安装 systemd 服务）
+
+已安装场景下，推荐通过中心端重新下发最新安装命令，节点执行后会覆盖脚本并重启服务。
+
+```bash
+# 在每台节点执行（使用中心端当前返回的 install_command）
+/bin/bash -c "$(curl -fsSL <install_command_url>)"
+```
+
+如果节点上已经存在 `vtm-agent` 管理脚本，也可以直接执行：
+
+```bash
+# 等价于重新部署最新 Agent
+bash /usr/local/bin/vtm-agent deploy
+
+# 查看状态
+systemctl status vps-traffic-agent.service --no-pager
+tail -n 100 /var/log/vps-traffic-monitor/agent.log
+```
+
+### 4.4.4 回滚建议
+
+中心端回滚：
+
+```bash
+cd /opt/VPS-traffic-monitor
+git log --oneline -n 5
+git reset --hard <previous_commit>
+docker compose up -d --build
+```
+
+Agent 回滚：
+- 优先使用上一版本的安装命令重新执行一次；
+- 或将 `/usr/local/bin/vtm-agent` 替换为备份版本后执行 `bash /usr/local/bin/vtm-agent deploy`。
+
+### 4.4.5 生产环境建议
+
+- 先在 1 台节点灰度升级 Agent，观察 15~30 分钟上报稳定性后再批量推开；
+- 中心端升级前对 `.env`、`docker-compose.yml` 和自定义配置做备份；
+- 建议为仓库版本打 tag（例如 `v2026.05.01`），便于快速回滚。
+
+---
+
 ## 5. 节点端接入
 
 ### 5.1 保留现有 Python Agent（兼容模式）
