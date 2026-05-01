@@ -20,11 +20,21 @@ import socket
 import subprocess
 import time
 import random
+import sys
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib import request
 
+
+
+
+# Ensure logs are flushed promptly even when stdout/stderr are redirected by systemd.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
