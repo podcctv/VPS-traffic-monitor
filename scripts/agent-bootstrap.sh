@@ -21,14 +21,26 @@ choose_iface() {
   if [[ -n "${IFACE:-}" ]]; then
     return
   fi
+  # one-liner install uses `curl ... | bash`, stdin is not a TTY in that case.
+  # Prefer interactive selection from /dev/tty when available.
+  local input_fd=0
   if [[ ! -t 0 ]]; then
+    if [[ -r /dev/tty ]]; then
+      input_fd=3
+      exec 3</dev/tty
+    else
+      IFACE="all"
+      return
+    fi
+  fi
+  if [[ ! -t "$input_fd" ]]; then
     IFACE="all"
     return
   fi
   echo "选择要监控的网卡（默认: all=全部网卡）:"
   mapfile -t ifaces < <(ip -o link show | awk -F': ' '{print $2}' | awk -F'@' '{print $1}' | grep -E '^(eth|ens|enp|eno|bond|br|wg|tun)' || true)
   if [[ "${#ifaces[@]}" -eq 0 ]]; then
-    read -r -p "未检测到常见网卡，输入网卡名(留空=all): " picked
+    read -r -u "$input_fd" -p "未检测到常见网卡，输入网卡名(留空=all): " picked
     IFACE="${picked:-all}"
     return
   fi
@@ -36,7 +48,7 @@ choose_iface() {
   for i in "${!ifaces[@]}"; do
     echo "$((i+1))) ${ifaces[$i]}"
   done
-  read -r -p "请输入编号 [0]: " idx
+  read -r -u "$input_fd" -p "请输入编号 [0]: " idx
   idx="${idx:-0}"
   if [[ "$idx" =~ ^[0-9]+$ ]] && (( idx >= 1 && idx <= ${#ifaces[@]} )); then
     IFACE="${ifaces[$((idx-1))]}"
