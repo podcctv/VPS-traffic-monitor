@@ -1,12 +1,11 @@
 # 说明：
-# 1) 从 Git 拉取源码部署：直接使用本文件，执行 `docker compose up -d --build`
-# 2) 仅下载本文件一键部署：请先把 image 改成你已发布的镜像地址，再执行 pull + up
+# 1) 通过 Git 获取本仓库后，可直接 `docker compose up -d`（默认拉取预编译镜像）。
+# 2) 如需本地自行构建，取消下方 build 注释并加 --build。
 
 services:
   central:
-    # 发布镜像后可改为：ghcr.io/<your-org>/<your-repo>:latest
-    image: vps-traffic-central:local
-    build: .
+    image: ghcr.io/podcctv/vps-traffic-monitor:latest
+    # build: .
     container_name: vps-traffic-central
     ports:
       - "8000:8000"
@@ -16,7 +15,7 @@ x-one-click-pull-script: |
   #!/usr/bin/env bash
   set -euo pipefail
 
-  COMPOSE_URL="${COMPOSE_URL:-https://raw.githubusercontent.com/<your-org>/<your-repo>/main/docker-compose.yml}"
+  COMPOSE_URL="${COMPOSE_URL:-https://raw.githubusercontent.com/podcctv/VPS-traffic-monitor/main/docker-compose.yml}"
   TARGET_FILE="${TARGET_FILE:-docker-compose.yml}"
 
   curl -fsSL "$COMPOSE_URL" -o "$TARGET_FILE"
