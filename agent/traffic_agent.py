@@ -18,6 +18,7 @@ import secrets
 import socket
 import subprocess
 import time
+import random
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -177,6 +178,42 @@ def post_payload(url: str, api_key: str, secret: str, payload: dict, timeout: in
         return resp.status, resp.read().decode()
 
 
+def post_payload_with_retry(
+    url: str,
+    api_key: str,
+    secret: str,
+    payload: dict,
+    timeout: int = 10,
+    max_retries: int = 3,
+    retry_base: float = 1.0,
+    retry_max: float = 15.0,
+) -> tuple[int, str]:
+    """Post payload with bounded exponential backoff.
+
+    Retry on network failures and 5xx responses. Do not retry on 4xx.
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return post_payload(url, api_key, secret, payload, timeout=timeout)
+        except HTTPError as exc:
+            if 400 <= exc.code < 500:
+                # auth/signature/config errors should fail fast.
+                raise
+            if attempt > max_retries:
+                raise
+            sleep_s = min(retry_max, retry_base * (2 ** (attempt - 1))) + random.uniform(0, 0.3)
+            print(f"[{iso_now()}] upload http error={exc.code}, retry={attempt}/{max_retries}, sleep={sleep_s:.1f}s")
+            time.sleep(sleep_s)
+        except URLError as exc:
+            if attempt > max_retries:
+                raise
+            sleep_s = min(retry_max, retry_base * (2 ** (attempt - 1))) + random.uniform(0, 0.3)
+            print(f"[{iso_now()}] upload url error={exc.reason}, retry={attempt}/{max_retries}, sleep={sleep_s:.1f}s")
+            time.sleep(sleep_s)
+
+
 def get_node_config(config_url: str, timeout: int = 10) -> dict:
     req = request.Request(url=config_url, method="GET")
     with request.urlopen(req, timeout=timeout) as resp:
@@ -216,6 +253,9 @@ def main() -> int:
     parser.add_argument("--iface")
     parser.add_argument("--interval", type=int, default=0, help="seconds, 0=run once")
     parser.add_argument("--version", default="1.0.0")
+    parser.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
+    parser.add_argument("--max-retries", type=int, default=3, help="max retries per report cycle")
+    parser.add_argument("--startup-jitter", type=int, default=3, help="random startup delay seconds")
     parser.add_argument(
         "--one-click",
         choices=["install", "uninstall"],
@@ -241,13 +281,25 @@ def main() -> int:
         print(f"[{iso_now()}] one-click action={args.one_click} done")
         return 0
 
+    if args.startup_jitter > 0:
+        jitter = random.uniform(0, args.startup_jitter)
+        print(f"[{iso_now()}] startup jitter sleep={jitter:.1f}s")
+        time.sleep(jitter)
+
     while True:
         try:
             data = run_vnstat_json()
             selected_ifaces = pick_interfaces(data, args.iface)
             iface_payloads = [build_payload(args.node_id, iface_data, args.version) for iface_data in selected_ifaces]
             payload = merge_payloads(args.node_id, iface_payloads, args.version)
-            status, body = post_payload(args.endpoint, args.api_key, args.hmac_secret, payload)
+            status, body = post_payload_with_retry(
+                args.endpoint,
+                args.api_key,
+                args.hmac_secret,
+                payload,
+                timeout=args.timeout,
+                max_retries=max(0, args.max_retries),
+            )
             print(f"[{iso_now()}] upload status={status} body={body}")
         except Exception as exc:
             print(f"[{iso_now()}] upload failed: {exc}")
