@@ -1,78 +1,178 @@
-# VPS Traffic Monitor MVP
+# VPS Traffic Monitor
 
-## 快速说明（GitHub 项目直接构建镜像）
+一个用于 **VPS 流量采集、上报与可视化** 的轻量级项目：
+- **Central（中心端）**：提供配置管理、安装脚本生成、数据接收与展示页面。
+- **Agent（节点端）**：部署在各 VPS 上，定时采集网卡流量并上报到中心端。
 
-- 中心端支持直接在 GitHub 项目目录中构建镜像并启动。
-- 一键安装脚本场景下，中心端只需要准备并分发 `docker-compose.yml`，即可快速一键安装。
-- 首次安装完成后，请先在系统中设置登录用户名和密码。
-- 默认未登录页面仅支持查看 VPS 流量，不提供修改权限；登录后可进行相关配置并进入后台管理。
+---
 
-## 1) 中心端 Docker 部署
+## 功能概览
 
-```bash
-docker compose up -d --build
-```
+- 节点配置管理（节点 ID、月流量配额、重置日）
+- 自动生成节点安装命令（直接执行 Bash 脚本）
+- 节点脚本支持 `install / upgrade / uninstall`，并支持通过 `git` 升级本地文件与脚本自身
+- 流量数据上报接口（支持 API Key + HMAC）
+- 登录校验接口（可按节点开关 + token 校验）
+- Web 首次登录强制设置管理员账号密码，登录后才能配置与查看
+- Web 页面查看节点状态与用量
+- Docker Compose 一键启动中心端
 
-健康检查：
+---
 
-```bash
-curl -s http://127.0.0.1:8000/docs >/dev/null && echo ok
-```
+## 运行要求
 
-## 2) 中心端配置节点 Agent 参数
+- Linux 服务器（推荐 Ubuntu / Debian）
+- Docker 24+
+- Docker Compose Plugin
 
-先调用配置接口写入 agent 参数（示例 node: `demo-node`）：
-
-```bash
-curl -X PUT 'http://127.0.0.1:8000/api/v1/nodes/demo-node/config' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "monthly_quota_gb": 1024,
-    "reset_day": 1,
-    "login_verify_enabled": true,
-    "install_script_url": "https://your-central.example.com/agent/traffic_agent.py",
-    "uninstall_script_url": "https://your-central.example.com/api/v1/nodes/demo-node/scripts/uninstall.sh",
-    "agent_endpoint": "https://your-central.example.com/api/v1/ingest",
-    "agent_api_key": "demo-key",
-    "agent_hmac_secret": "demo-secret",
-    "agent_iface": "eth0",
-    "agent_interval": 120
-  }'
-```
-
-> `agent_endpoint/install_script_url/uninstall_script_url` 需使用 HTTPS。
-
-## 3) 生成一键安装/卸载脚本
-
-中心端会按节点配置动态生成脚本：
-
-- 安装脚本：`GET /api/v1/nodes/{node_id}/scripts/install.sh`
-- 卸载脚本：`GET /api/v1/nodes/{node_id}/scripts/uninstall.sh`
-
-下载示例：
+环境检查：
 
 ```bash
-curl -fsSL 'http://127.0.0.1:8000/api/v1/nodes/demo-node/scripts/install.sh' -o install.sh
-curl -fsSL 'http://127.0.0.1:8000/api/v1/nodes/demo-node/scripts/uninstall.sh' -o uninstall.sh
+docker --version
+docker compose version
 ```
 
-## 4) VPS 上一键安装 / 一键卸载
+---
 
-> 以下在 **目标 VPS** 执行。
+## 快速开始（推荐）
 
-一键安装：
+> 当前 `docker-compose.yml` 会优先尝试预编译镜像；当镜像仓库不可访问时会自动改为本地构建。
 
 ```bash
-curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/install.sh' | sudo bash -s -- install
+git clone https://github.com/podcctv/VPS-traffic-monitor.git
+cd VPS-traffic-monitor
+docker compose up -d
 ```
 
-一键卸载：
+启动后可验证：
 
 ```bash
-curl -fsSL 'https://your-central.example.com/api/v1/nodes/demo-node/scripts/uninstall.sh' | sudo bash -s -- uninstall
+curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "central ok"
 ```
 
-## Agent（手动运行模式）
+浏览器访问：
+
+- `http://<你的服务器IP>:8000/`
+
+如果开启防火墙，请放行 `8000/tcp`。
+
+
+
+## 中心端一键脚本（安装 / 升级 / 卸载）
+
+中心端支持通过一键脚本完成：
+- 安装（install）
+- 升级（upgrade）
+- 卸载（uninstall）
+
+你可以在中心端页面生成命令，也可以直接使用下面的方式：
+
+### 1) 安装
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- install
+```
+
+### 2) 升级
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- upgrade
+```
+
+### 3) 卸载
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' | sudo bash -s -- uninstall
+```
+
+支持环境变量：
+- `REPO_URL`：仓库地址（默认 `https://github.com/podcctv/VPS-traffic-monitor.git`）
+- `INSTALL_DIR`：部署目录（默认 `/opt/VPS-traffic-monitor`）
+- `BRANCH`：分支（默认 `main`）
+
+### 脚本工作方式
+
+- 一键脚本会通过 `git` 将仓库下载到本地目录。
+- 升级时会更新本地 `git` 仓库内容，并重建/重启容器。
+- 脚本支持“自更新”：会优先刷新脚本本身，再执行 install/upgrade/uninstall。
+- 因此它既可以更新自己，也可以更新 `git` 目录中的全部项目文件。
+
+如果你希望本地持久化一个“可自我更新”的命令，可先保存后执行：
+
+```bash
+curl -fsSL 'http://<你的服务器IP>:8000/api/v1/central/scripts/upgrade.sh' -o /usr/local/bin/vtm-central
+chmod +x /usr/local/bin/vtm-central
+/usr/local/bin/vtm-central upgrade
+```
+
+后续每次运行 `/usr/local/bin/vtm-central` 时都会优先尝试刷新该脚本本身。
+
+---
+
+## 节点安装（Agent）
+
+在中心端页面填写节点信息后，可获得一键安装命令（直接 Bash，不依赖中心端动态生成安装脚本）。示例：
+
+```bash
+curl -fsSL 'https://your-central.example.com/raw/<api-key>/agent-bootstrap.sh' \
+  | sudo NODE_ID='demo-node' ENDPOINT='https://your-central.example.com/api/v1/ingest' API_KEY='<api-key>' HMAC_SECRET='<hmac-secret>' bash -s -- install
+
+# 可选：指定单网卡（不传则安装时会交互选择，默认 all 监控全部网卡）
+# ... IFACE='eth0' bash -s -- install
+```
+
+如果节点上已存在 Agent，再次执行 `install` 会先提示“检测到已安装 Agent”，然后覆盖安装（更新代码、配置和 systemd 单元）。
+
+升级示例（会 `git fetch/reset` 并刷新本地脚本自身）：
+
+```bash
+bash /usr/local/bin/vtm-agent upgrade
+```
+
+卸载示例：
+
+```bash
+bash /usr/local/bin/vtm-agent uninstall
+```
+
+后台支持“远程卸载客户端”按钮：中心端下发卸载动作，节点在下一次上报后自动执行 `uninstall`，包括停服务、删除 systemd 单元、删除配置与日志文件。
+
+---
+
+## API 使用（可选）
+
+可通过 `POST /api/v1/quick-setup` 创建节点配置并获取安装命令。
+
+请求示例：
+
+```json
+{
+  "node_id": "demo-node",
+  "monthly_quota_gb": 1024,
+  "reset_day": 1
+}
+```
+
+返回内容包含：
+- `config`：节点完整配置
+- `install_command`：一键安装命令
+
+新增接口：
+- `POST /api/v1/nodes/{node_id}/login-verify`：登录验证
+- `GET /api/v1/dashboard`：中心端展示数据（节点配置 + 最新上报）
+
+---
+
+## 本地开发运行
+
+### 1) 启动中心端（非 Docker）
+
+```bash
+pip install fastapi uvicorn
+uvicorn central.server:app --host 0.0.0.0 --port 8000
+```
+
+### 2) 手动运行 Agent
 
 ```bash
 python3 agent/traffic_agent.py \
@@ -80,10 +180,14 @@ python3 agent/traffic_agent.py \
   --api-key demo-key \
   --hmac-secret demo-secret \
   --node-id demo-node \
-  --iface eth0
+  --iface all \
+  --interval 120
 ```
 
-周期上报：加上 `--interval 120`。
+`--iface` 支持：
+- `all`：监控并汇总全部网卡（推荐）
+- 单个网卡名：如 `eth0`、`ens3`
+- 多网卡逗号分隔：如 `eth0,ens3`
 
 ### 一键安装/卸载（由中心端下发）
 中心端先在节点配置中写入脚本链接（必须是 HTTPS）：
@@ -116,11 +220,18 @@ python3 agent/traffic_agent.py \
 ## 中心端
 安装依赖：
 
-```bash
-pip install fastapi uvicorn
+```text
+.
+├── agent/
+│   └── traffic_agent.py
+├── central/
+│   └── server.py
+├── docker-compose.yml
+├── Dockerfile
+└── README.md
 ```
 
-启动：
+---
 
 ```bash
 uvicorn central.server:app --host 0.0.0.0 --port 8000

@@ -1,7 +1,24 @@
+# 说明：
+# 1) 通过 Git 获取本仓库后，可直接 `docker compose up -d`（默认拉取预编译镜像）。
+# 2) 如需本地自行构建，取消下方 build 注释并加 --build。
+
 services:
   central:
+    image: ghcr.io/podcctv/vps-traffic-monitor:latest
     build: .
+    pull_policy: build
     container_name: vps-traffic-central
     ports:
       - "8000:8000"
     restart: unless-stopped
+
+x-one-click-pull-script: |
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  COMPOSE_URL="$${COMPOSE_URL:-https://raw.githubusercontent.com/podcctv/VPS-traffic-monitor/main/docker-compose.yml}"
+  TARGET_FILE="$${TARGET_FILE:-docker-compose.yml}"
+
+  curl -fsSL "$${COMPOSE_URL}" -o "$${TARGET_FILE}"
+  docker compose -f "$${TARGET_FILE}" pull
+  docker compose -f "$${TARGET_FILE}" up -d
